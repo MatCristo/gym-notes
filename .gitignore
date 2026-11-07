@@ -41,3 +41,22 @@ example
 # generated native folders
 /ios
 /android
+
+# testes
+/coverage
+
+# variáveis de ambiente e segredos (nunca versionar)
+.env
+.env.*
+!.env.example
+*.keystore
+credentials.json
+google-services.json
+service-account*.json
+
+# builds baixados do EAS
+*.apk
+*.aab
+
+# logs
+*.log
