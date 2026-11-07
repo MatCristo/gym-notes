@@ -164,7 +164,7 @@ Os dados ficam em um banco **SQLite local** (`gym-notes.db`), aberto uma única 
 ### Instalação
 
 ```bash
-git clone https://github.com/<seu-usuario>/gym-notes.git
+git clone https://github.com/MatCristo/gym-notes.git
 cd gym-notes
 npm install
 ```
