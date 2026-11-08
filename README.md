@@ -45,6 +45,8 @@ histórico, estatísticas e gráficos.
   sessões, histórico ou estatísticas.
 - A exclusão pede confirmação, remove os treinos do planejamento e **mantém o histórico** dos treinos já
   realizados. Não é permitida enquanto algum treino do planejamento estiver em andamento.
+- Compartilhar um planejamento por **código de texto** (pelo WhatsApp ou qualquer app) e importar planejamentos
+  recebidos como cópias independentes — veja [Compartilhamento de planejamentos](#compartilhamento-de-planejamentos).
 
 **Treinos**
 - Criar, renomear e excluir treinos dentro de um planejamento (com confirmação).
@@ -71,6 +73,57 @@ histórico, estatísticas e gráficos.
 - Evolução por exercício: última carga, maior carga e gráfico de linha da maior carga por sessão,
   com filtros de 30 dias, 90 dias, 6 meses ou todo o período.
 - Estatísticas gerais: total de treinos, séries e tempo, média semanal e treinos por semana e por mês.
+
+## Compartilhamento de planejamentos
+
+Um planejamento pode ser enviado para outra pessoa como um **código de texto**, sem servidor, conta ou internet
+própria do app: o código viaja pelo aplicativo de mensagens que você já usa.
+
+**O que é compartilhado — e o que nunca é**
+
+| Vai no código | Nunca vai no código |
+| --- | --- |
+| Nome e descrição do planejamento | Sessões (concluídas ou em andamento) e histórico |
+| Nome e ordem dos treinos | Cargas e repetições realizadas, séries concluídas |
+| Nome e ordem dos exercícios | Datas e horários de execução, duração dos treinos |
+| Séries, repetições, carga **planejada** e descanso | Recordes, estatísticas, evolução e gráficos |
+| | Identificadores internos e datas do banco |
+
+> **Atenção:** o código **não é criptografado**. Ele é apenas codificado em texto: qualquer pessoa que o receber
+> consegue ler o conteúdo do planejamento. Compartilhe somente com quem você quiser.
+
+**Como compartilhar (ex.: WhatsApp)**
+1. Na aba **Treinos**, toque em **•••** no planejamento e escolha **Compartilhar planejamento**
+   (disponível quando o planejamento tem ao menos um treino).
+2. Toque em **Compartilhar** e escolha o WhatsApp (ou outro app) — a mensagem já vai com uma explicação curta e o
+   código completo. Se preferir, use **Copiar código** e cole na conversa.
+
+**Como importar**
+1. Copie a mensagem recebida (pode ser a mensagem inteira, com o texto em volta do código).
+2. Na aba **Treinos**, toque em **Importar** (ou em **Importar planejamento**, se a lista estiver vazia).
+3. Toque em **Colar código** (ou cole manualmente no campo) e depois em **Ver prévia**.
+4. Confira o nome, os treinos e a quantidade de exercícios e toque em **Importar planejamento**.
+
+A importação **sempre cria um planejamento novo e independente**: nenhum planejamento existente é alterado ou
+substituído. Se já existir um planejamento com o mesmo nome, o novo recebe o sufixo **“(Importado)”** (ou
+“(Importado 2)”, “(Importado 3)”…). Alterar o texto depois da prévia exige uma nova prévia, e o conteúdo é
+validado de novo no momento da confirmação. Se algo falhar no meio, nada é gravado.
+
+**Formato do código (visão geral)**
+- Começa com `GN1:` — identifica o Gym Notes e a versão do formato. Códigos de versões mais novas pedem a
+  atualização do app em vez de serem importados de forma incorreta.
+- O conteúdo é um JSON compacto em UTF-8 (acentos e emojis preservados) codificado em Base64, seguido de um
+  **CRC-32** que detecta códigos incompletos ou alterados.
+- O código é validado inteiro antes de qualquer gravação, com os mesmos limites do app (nomes, séries, repetições,
+  carga e descanso) e limites próprios: até **50 treinos**, **100 exercícios por treino** e **100 KB** de texto.
+
+**Limitações conhecidas**
+- O compartilhamento é feito apenas por texto: não há link, QR Code nem abertura automática do app.
+- Planejamentos sem treinos, com mais de 50 treinos ou com mais de 100 exercícios em um treino não podem ser
+  compartilhados.
+- Caracteres invisíveis inseridos **dentro** do código por outros apps (ex.: espaço de largura zero) o invalidam;
+  nesse caso, peça para a pessoa enviar o código novamente.
+- O código copiado fica na área de transferência do aparelho, como qualquer texto copiado.
 
 ## Capturas de tela
 
@@ -100,6 +153,7 @@ Para adicionar, salve os arquivos em docs/screenshots/ e troque cada célula pel
 | Identificadores | UUID v4 com `expo-crypto` |
 | Gestos e animações | React Native Gesture Handler · Reanimated 4 |
 | Reordenação | `react-native-reorderable-list` |
+| Compartilhamento | `Share` do React Native · área de transferência com `expo-clipboard` |
 | Otimização | React Compiler (habilitado em `app.json`) |
 | Testes | Jest com `jest-expo` |
 | Qualidade | ESLint (`eslint-config-expo`) · `expo-doctor` |
@@ -142,7 +196,8 @@ src/
 │   ├── workouts/         # Treinos
 │   ├── exercises/        # Exercícios planejados
 │   ├── sessions/         # Execução, séries e cronômetro
-│   └── history/          # Histórico, estatísticas e evolução
+│   ├── history/          # Histórico, estatísticas e evolução
+│   └── sharing/          # Código de compartilhamento (formato GN1), exportação e importação
 │       └── (components | hooks | services | repositories | types | utils)
 ├── hooks/                # Hooks compartilhados
 ├── theme/                # Cores, espaçamentos e tipografia
@@ -239,6 +294,11 @@ atualização de bancos antigos com dados reais), CRUD de planejamentos, treinos
 reordenação, bloqueios de exclusão com treino em andamento, execução e recuperação de sessões, cronômetro,
 histórico, estatísticas e evolução de cargas.
 
+O compartilhamento tem testes próprios: o formato do código (UTF-8, Base64, CRC-32, códigos truncados,
+alterados ou de versões futuras), a validação, testes de **privacidade** (com sessões e cargas realizadas no banco,
+o código exportado é decodificado e conferido campo a campo), importação transacional com rollback, nomes
+duplicados e os fluxos de interface de exportação e importação.
+
 Eles rodam contra um **SQLite real** (o módulo `node:sqlite` do Node, com a mesma API usada pelo app),
 então migrations, chaves estrangeiras, `CHECK`s e transações são de fato exercitados. Reinícios do app são
 simulados reabrindo o mesmo arquivo de banco.
@@ -253,13 +313,17 @@ O Gym Notes não coleta nem envia dados. Não há conta, login, servidor ou sinc
 localmente no aparelho. A única permissão Android declarada é `INTERNET` (padrão do React Native), e o app não
 solicita nenhuma permissão ao usuário.
 
+O compartilhamento de planejamentos só acontece quando você escolhe compartilhar, e o app não envia nada por
+conta própria: o código é entregue ao aplicativo que você escolher. Ele contém apenas a estrutura e as
+prescrições do planejamento (veja [o que é compartilhado](#compartilhamento-de-planejamentos)) e não é
+criptografado.
+
 ## Roadmap
 
 Ideias em avaliação para as próximas versões (ainda **não** implementadas):
 
-- Compartilhamento de planejamentos por código (somente a estrutura e a prescrição dos treinos — nunca histórico,
-  cargas realizadas ou estatísticas). A importação criará sempre uma cópia independente.
-- Exportação e importação de dados (backup).
+- Exportação e importação de dados (backup). Não confundir com o compartilhamento de planejamentos, que nunca
+  inclui dados pessoais.
 - Publicação na Google Play.
 
 ## Licença

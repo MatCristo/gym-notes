@@ -15,6 +15,8 @@ interface ProgramListProps {
   onProgramPress: (program: TrainingProgram) => void;
   onProgramOptionsPress: (program: TrainingProgram) => void;
   onCreateProgramPress: () => void;
+  /** Abre a importação por código (exibida também no estado vazio). */
+  onImportProgramPress: () => void;
   /** Estado do carregamento. Enquanto não estiver `ready`, a lista exibe loading ou erro. */
   status: ProgramsStatus;
   onRetryPress: () => void;
@@ -32,9 +34,10 @@ function ItemSeparator() {
 
 interface EmptyStateProps {
   onCreateProgramPress: () => void;
+  onImportProgramPress: () => void;
 }
 
-function ProgramListEmptyState({ onCreateProgramPress }: EmptyStateProps) {
+function ProgramListEmptyState({ onCreateProgramPress, onImportProgramPress }: EmptyStateProps) {
   return (
     <View style={styles.emptyState}>
       <View style={styles.emptyBadge} importantForAccessibility="no-hide-descendants">
@@ -52,6 +55,13 @@ function ProgramListEmptyState({ onCreateProgramPress }: EmptyStateProps) {
         onPress={onCreateProgramPress}
         accessibilityLabel="Criar primeiro planejamento"
         style={styles.emptyButton}
+      />
+      <PrimaryButton
+        label="Importar planejamento"
+        variant="secondary"
+        onPress={onImportProgramPress}
+        accessibilityLabel="Importar planejamento"
+        accessibilityHint="Cria um planejamento a partir de um código recebido"
       />
     </View>
   );
@@ -88,6 +98,7 @@ export function ProgramList({
   onProgramPress,
   onProgramOptionsPress,
   onCreateProgramPress,
+  onImportProgramPress,
   status,
   onRetryPress,
   header,
@@ -99,7 +110,10 @@ export function ProgramList({
     ) : status === 'error' ? (
       <ProgramListErrorState onRetryPress={onRetryPress} />
     ) : (
-      <ProgramListEmptyState onCreateProgramPress={onCreateProgramPress} />
+      <ProgramListEmptyState
+        onCreateProgramPress={onCreateProgramPress}
+        onImportProgramPress={onImportProgramPress}
+      />
     );
 
   const renderItem: ListRenderItem<TrainingProgram> = ({ item }) => (

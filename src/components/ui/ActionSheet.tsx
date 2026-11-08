@@ -11,6 +11,10 @@ export interface ActionSheetAction {
   onPress: () => void;
   destructive?: boolean;
   accessibilityLabel?: string;
+  /** Ação indisponível: exibida esmaecida e sem resposta ao toque. */
+  disabled?: boolean;
+  /** Texto curto abaixo do rótulo (ex.: por que a ação está indisponível). */
+  hint?: string;
 }
 
 interface ActionSheetProps {
@@ -27,18 +31,26 @@ interface ActionItemProps {
   onPress: () => void;
   destructive?: boolean;
   accessibilityLabel?: string;
+  disabled?: boolean;
+  hint?: string;
 }
 
-function ActionItem({ label, onPress, destructive = false, accessibilityLabel }: ActionItemProps) {
+function ActionItem({ label, onPress, destructive = false, accessibilityLabel, disabled = false, hint }: ActionItemProps) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      android_ripple={{ color: colors.pressedOverlay }}
-      style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+      accessibilityHint={hint}
+      accessibilityState={{ disabled }}
+      android_ripple={disabled ? undefined : { color: colors.pressedOverlay }}
+      style={({ pressed }) => [styles.item, pressed && !disabled && styles.itemPressed]}
     >
-      <Text style={[styles.itemLabel, destructive && styles.itemLabelDestructive]}>{label}</Text>
+      <Text style={[styles.itemLabel, destructive && styles.itemLabelDestructive, disabled && styles.itemDisabled]}>
+        {label}
+      </Text>
+      {hint ? <Text style={styles.itemHint}>{hint}</Text> : null}
     </Pressable>
   );
 }
@@ -61,6 +73,8 @@ export function ActionSheet({ visible, overline, title, actions, onClose, cancel
               onPress={action.onPress}
               destructive={action.destructive}
               accessibilityLabel={action.accessibilityLabel}
+              disabled={action.disabled}
+              hint={action.hint}
             />
           </View>
         ))}
@@ -108,5 +122,13 @@ const styles = StyleSheet.create({
   },
   itemLabelDestructive: {
     color: colors.error,
+  },
+  itemDisabled: {
+    color: colors.textSecondary,
+  },
+  itemHint: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    paddingBottom: spacing.sm,
   },
 });

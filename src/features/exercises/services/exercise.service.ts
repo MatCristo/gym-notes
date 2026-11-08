@@ -85,10 +85,13 @@ export class ExerciseServiceError extends Error {
   }
 }
 
-/** Revalida a entrada já numérica (defesa contra chamadas que não passaram pelo formulário). */
-function assertValidInput(input: ExerciseInput): ExerciseInput {
+/**
+ * Regra única de validade de um exercício planejado (já numérico). Pura: usada pelo service
+ * e pela importação de planejamentos compartilhados. O nome é considerado após `trim`.
+ */
+export function isValidExerciseInput(input: ExerciseInput): boolean {
   const name = input.name.trim();
-  const valid =
+  return (
     name.length > 0 &&
     name.length <= EXERCISE_LIMITS.nameMaxLength &&
     Number.isInteger(input.sets) &&
@@ -102,9 +105,16 @@ function assertValidInput(input: ExerciseInput): ExerciseInput {
     input.weightKg <= EXERCISE_LIMITS.weightMaxKg &&
     Number.isInteger(input.restSeconds) &&
     input.restSeconds >= 0 &&
-    input.restSeconds <= EXERCISE_LIMITS.restMaxSeconds;
-  if (!valid) throw new ExerciseServiceError('invalid-input', 'Dados do exercício inválidos.');
-  return { ...input, name };
+    input.restSeconds <= EXERCISE_LIMITS.restMaxSeconds
+  );
+}
+
+/** Revalida a entrada já numérica (defesa contra chamadas que não passaram pelo formulário). */
+function assertValidInput(input: ExerciseInput): ExerciseInput {
+  if (!isValidExerciseInput(input)) {
+    throw new ExerciseServiceError('invalid-input', 'Dados do exercício inválidos.');
+  }
+  return { ...input, name: input.name.trim() };
 }
 
 /** Regras de negócio dos exercícios planejados. Toda leitura/escrita passa pelo repository. */

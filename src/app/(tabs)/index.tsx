@@ -14,6 +14,11 @@ import { ProgramServiceError, type ProgramInput } from '@/features/programs/serv
 import type { ProgramFormMode, TrainingProgram } from '@/features/programs/types/program.types';
 import { InProgressSessionBanner } from '@/features/sessions/components/InProgressSessionBanner';
 import { useInProgressSessions } from '@/features/sessions/hooks/useInProgressSessions';
+import { ImportProgramModal } from '@/features/sharing/components/ImportProgramModal';
+import { ShareProgramSheet } from '@/features/sharing/components/ShareProgramSheet';
+import { useProgramImport } from '@/features/sharing/hooks/useProgramImport';
+import { useProgramSharing } from '@/features/sharing/hooks/useProgramSharing';
+import type { ExportedProgram } from '@/features/sharing/types/sharing.types';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -24,7 +29,9 @@ type OverlayState =
   | { type: 'form'; mode: 'create'; key: number }
   | { type: 'form'; mode: 'edit'; key: number; program: TrainingProgram }
   | { type: 'actions'; program: TrainingProgram }
-  | { type: 'confirm-delete'; program: TrainingProgram };
+  | { type: 'confirm-delete'; program: TrainingProgram }
+  | { type: 'share'; exported: ExportedProgram }
+  | { type: 'import'; key: number };
 
 function getGreeting(date: Date): string {
   const hour = date.getHours();
@@ -45,6 +52,8 @@ export default function HomeScreen() {
   const toast = useToast();
 
   const { sessions: inProgressSessions, refresh: refreshSessions } = useInProgressSessions();
+  const { isExporting, exportProgram, copyCode, shareCode } = useProgramSharing();
+  const { paste, preview, importCode } = useProgramImport();
 
   // Ao abrir/voltar para a Home: atualiza a contagem de treinos e detecta sessões em andamento
   // (inclusive após o app ter sido fechado no meio de um treino).
@@ -130,6 +139,30 @@ export default function HomeScreen() {
     }
   };
 
+  /** Gera o código e só então abre o painel; em caso de falha, mostra o motivo e não abre nada. */
+  const handleShare = async (program: TrainingProgram) => {
+    if (isExporting) return;
+    setOverlay({ type: 'none' });
+    const result = await exportProgram(program.id);
+    if (!result) return;
+    if (result.ok) setOverlay({ type: 'share', exported: result.exported });
+    else toast.show(result.message, 'error');
+  };
+
+  const openImport = () => {
+    // Nova `key` a cada abertura: o código digitado antes nunca é reaproveitado.
+    const key = formOpenCount + 1;
+    setFormOpenCount(key);
+    setOverlay({ type: 'import', key });
+  };
+
+  /** Após importar: fecha a interface, atualiza a lista a partir do banco e confirma com o nome. */
+  const handleImported = (program: TrainingProgram) => {
+    setOverlay({ type: 'none' });
+    void refresh();
+    toast.show(`Planejamento importado com sucesso: “${program.name}”`);
+  };
+
   const handleProgramPress = (program: TrainingProgram) => {
     router.push({ pathname: '/program/[id]', params: { id: program.id, name: program.name } });
   };
@@ -168,13 +201,23 @@ export default function HomeScreen() {
           ) : null}
         </View>
         {status === 'ready' && programs.length > 0 ? (
-          <PrimaryButton
-            label="Novo"
-            leadingSymbol="+"
-            size="compact"
-            onPress={() => openForm('create')}
-            accessibilityLabel="Adicionar planejamento"
-          />
+          <View style={styles.sectionActions}>
+            <PrimaryButton
+              label="Importar"
+              variant="secondary"
+              size="compact"
+              onPress={openImport}
+              accessibilityLabel="Importar planejamento"
+              accessibilityHint="Cria um planejamento a partir de um código recebido"
+            />
+            <PrimaryButton
+              label="Novo"
+              leadingSymbol="+"
+              size="compact"
+              onPress={() => openForm('create')}
+              accessibilityLabel="Adicionar planejamento"
+            />
+          </View>
         ) : null}
       </View>
     </View>
@@ -188,6 +231,7 @@ export default function HomeScreen() {
         onProgramPress={handleProgramPress}
         onProgramOptionsPress={(program) => setOverlay({ type: 'actions', program })}
         onCreateProgramPress={() => openForm('create')}
+        onImportProgramPress={openImport}
         status={status}
         onRetryPress={reload}
       />
@@ -211,7 +255,30 @@ export default function HomeScreen() {
           program={overlay.program}
           onEdit={(program) => openForm('edit', program)}
           onDuplicate={handleDuplicate}
+          onShare={handleShare}
           onDelete={(program) => setOverlay({ type: 'confirm-delete', program })}
+          onClose={closeOverlay}
+        />
+      ) : null}
+
+      {overlay.type === 'import' ? (
+        <ImportProgramModal
+          key={overlay.key}
+          visible
+          onPaste={paste}
+          onPreview={preview}
+          onImport={importCode}
+          onImported={handleImported}
+          onClose={closeOverlay}
+        />
+      ) : null}
+
+      {overlay.type === 'share' ? (
+        <ShareProgramSheet
+          visible
+          exported={overlay.exported}
+          onCopy={copyCode}
+          onShare={shareCode}
           onClose={closeOverlay}
         />
       ) : null}
@@ -278,6 +345,10 @@ const styles = StyleSheet.create({
   sectionTitleGroup: {
     flexShrink: 1,
     gap: spacing.xxs,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   sectionTitle: {
     ...typography.display,

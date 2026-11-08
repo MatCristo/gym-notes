@@ -1,10 +1,12 @@
 import { randomUUID } from 'expo-crypto';
 
 import { runInTransaction } from '@/database/database';
+import { exerciseRepository } from '@/features/exercises/repositories/exercise.repository';
 import { programRepository } from '@/features/programs/repositories/program.repository';
 import {
   PROGRAM_DESCRIPTION_MAX_LENGTH,
   PROGRAM_NAME_MAX_LENGTH,
+  type ProgramStructure,
   type TrainingProgram,
 } from '@/features/programs/types/program.types';
 import { sessionRepository } from '@/features/sessions/repositories/session.repository';
@@ -72,6 +74,46 @@ async function requireProgram(id: string): Promise<TrainingProgram> {
   const program = await programRepository.findById(id);
   if (!program) throw new ProgramServiceError('not-found', 'Planejamento não encontrado.');
   return program;
+}
+
+export interface CreateProgramFromStructureOptions {
+  /** Nome final do planejamento (ex.: já com o sufixo " (Importado)"). */
+  name: string;
+  createdAt: string;
+}
+
+/**
+ * Cria um planejamento NOVO a partir de uma estrutura já validada: novos UUIDs para planejamento,
+ * treinos e exercícios, timestamps `createdAt`, e ordem = posição nos arrays (0..n-1).
+ * O planejamento vai para o fim da lista. Nunca altera registros existentes e não cria sessões
+ * nem histórico. Não abre transação própria: DEVE ser chamada dentro de `runInTransaction`.
+ */
+export async function createProgramFromStructure(
+  structure: ProgramStructure,
+  { name, createdAt }: CreateProgramFromStructureOptions,
+): Promise<string> {
+  const programId = randomUUID();
+  await programRepository.insert({ id: programId, name, description: structure.description, createdAt });
+
+  for (const [workoutIndex, workout] of structure.workouts.entries()) {
+    const workoutId = randomUUID();
+    await workoutRepository.insert({ id: workoutId, programId, name: workout.name, createdAt, sortOrder: workoutIndex });
+
+    for (const [exerciseIndex, exercise] of workout.exercises.entries()) {
+      await exerciseRepository.insert({
+        id: randomUUID(),
+        workoutId,
+        name: exercise.name,
+        sets: exercise.sets,
+        reps: exercise.reps,
+        weightKg: exercise.weightKg,
+        restSeconds: exercise.restSeconds,
+        sortOrder: exerciseIndex,
+        createdAt,
+      });
+    }
+  }
+  return programId;
 }
 
 /** Regras de negócio dos planejamentos. Toda leitura/escrita passa pelos repositories. */

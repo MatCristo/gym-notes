@@ -15,6 +15,7 @@ type HistoryServiceModule = typeof import('@/features/history/services/history.s
 type ProgramServiceModule = typeof import('@/features/programs/services/program.service');
 type WorkoutRepositoryModule = typeof import('@/features/workouts/repositories/workout.repository');
 type ProgramRepositoryModule = typeof import('@/features/programs/repositories/program.repository');
+type SharingServiceModule = typeof import('@/features/sharing/services/sharing.service');
 
 export interface TestApp {
   dbPath: string;
@@ -28,6 +29,7 @@ export interface TestApp {
   programs: ProgramServiceModule;
   workoutRepository: WorkoutRepositoryModule['workoutRepository'];
   programRepository: ProgramRepositoryModule['programRepository'];
+  sharing: SharingServiceModule;
 }
 
 function load(dbPath: string): TestApp {
@@ -43,6 +45,7 @@ function load(dbPath: string): TestApp {
     programs: require('@/features/programs/services/program.service'),
     workoutRepository: require('@/features/workouts/repositories/workout.repository').workoutRepository,
     programRepository: require('@/features/programs/repositories/program.repository').programRepository,
+    sharing: require('@/features/sharing/services/sharing.service'),
   };
 }
 
