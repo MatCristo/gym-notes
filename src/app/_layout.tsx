@@ -39,8 +39,9 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: colors.background },
           }}
         >
-          {/* Navegação principal (abas): Treinos, Histórico e Estatísticas. */}
+          {/* Navegação principal (abas): Treinos (planejamentos), Histórico e Estatísticas. */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Início' }} />
+          <Stack.Screen name="program/[id]" options={{ title: 'Planejamento' }} />
           <Stack.Screen name="workout/[id]" options={{ title: 'Treino' }} />
           <Stack.Screen name="session/[id]" options={{ title: 'Treino em andamento' }} />
           <Stack.Screen name="session/summary/[id]" options={{ title: 'Resumo', animation: 'fade' }} />

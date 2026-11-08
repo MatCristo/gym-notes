@@ -22,8 +22,9 @@
 ## Sobre o projeto
 
 O **Gym Notes** nasceu para substituir o bloco de notas que muita gente usa na academia. Em vez de anotar
-cargas soltas, você cadastra seus treinos e exercícios uma vez, executa o treino pelo app marcando cada série
-e, com o tempo, enxerga a sua evolução em histórico, estatísticas e gráficos.
+cargas soltas, você organiza seus treinos em **planejamentos** (ex.: “Hipertrofia”, “Treino em casa”), cadastra os
+exercícios uma vez, executa o treino pelo app marcando cada série e, com o tempo, enxerga a sua evolução em
+histórico, estatísticas e gráficos.
 
 **Objetivos do projeto**
 
@@ -37,13 +38,24 @@ e, com o tempo, enxerga a sua evolução em histórico, estatísticas e gráfico
 
 ## Funcionalidades
 
+**Planejamentos**
+- Vários planejamentos, cada um com seus próprios treinos (A, B, C, D… com nomes livres).
+- Criar, editar (nome e descrição opcional), duplicar e excluir planejamentos.
+- Duplicar um planejamento copia todos os treinos e exercícios, com a mesma prescrição e ordem — sem copiar
+  sessões, histórico ou estatísticas.
+- A exclusão pede confirmação, remove os treinos do planejamento e **mantém o histórico** dos treinos já
+  realizados. Não é permitida enquanto algum treino do planejamento estiver em andamento.
+
 **Treinos**
-- Criar, renomear e excluir treinos (com confirmação).
+- Criar, renomear e excluir treinos dentro de um planejamento (com confirmação).
 - Duplicar um treino com todos os seus exercícios.
+- Reordenar treinos arrastando pela alça (a ordem é salva e é independente em cada planejamento).
+- Iniciar ou continuar um treino direto pelo menu de opções.
+- Um treino em andamento não pode ser excluído até ser finalizado.
 
 **Exercícios**
 - Cadastrar exercícios com séries, repetições, carga (kg) e descanso (segundos), com validação dos campos.
-- Editar e excluir exercícios.
+- Editar, duplicar (a cópia entra logo abaixo do original) e excluir exercícios.
 - Reordenar exercícios arrastando (a ordem é salva).
 
 **Execução do treino**
@@ -108,13 +120,17 @@ Tela (src/app) → Hook → Service → Repository → SQLite
 | --- | --- |
 | **Telas e componentes** | Apresentação. Nenhum componente executa SQL. |
 | **Hooks** | Estado da tela e integração com a interface (carregamento, erro, atualização da lista). |
-| **Services** | Regras de negócio e validação (ex.: não iniciar treino sem exercícios, duplicação transacional). |
+| **Services** | Regras de negócio e validação (ex.: não iniciar treino sem exercícios, duplicação transacional, bloqueio de exclusão com treino em andamento). |
 | **Repositories** | Único ponto que executa SQL, sempre com consultas parametrizadas. |
+
+Navegação principal: **Planejamentos** (aba Treinos) → **Treinos do planejamento** → **Exercícios do treino** →
+**Execução**. As abas Histórico e Estatísticas são globais (consideram todos os planejamentos).
 
 ```
 src/
 ├── app/                  # Rotas (Expo Router)
-│   ├── (tabs)/           # Abas: Treinos, Histórico e Estatísticas
+│   ├── (tabs)/           # Abas: Treinos (lista de planejamentos), Histórico e Estatísticas
+│   ├── program/[id].tsx  # Treinos de um planejamento
 │   ├── workout/[id].tsx  # Detalhes do treino e exercícios
 │   ├── session/          # Execução do treino e resumo
 │   ├── history/[id].tsx  # Detalhes de uma sessão concluída
@@ -122,6 +138,7 @@ src/
 ├── components/           # Componentes reutilizáveis (ui/ e charts/)
 ├── database/             # Conexão SQLite, transações e migrations
 ├── features/
+│   ├── programs/         # Planejamentos
 │   ├── workouts/         # Treinos
 │   ├── exercises/        # Exercícios planejados
 │   ├── sessions/         # Execução, séries e cronômetro
@@ -129,7 +146,7 @@ src/
 │       └── (components | hooks | services | repositories | types | utils)
 ├── hooks/                # Hooks compartilhados
 ├── theme/                # Cores, espaçamentos e tipografia
-└── utils/                # Formatação de números, datas e tempo
+└── utils/                # Formatação de números, datas e tempo; utilitários de lista
 test/                     # Infraestrutura dos testes (mocks e helpers)
 ```
 
@@ -140,14 +157,21 @@ Os dados ficam em um banco **SQLite local** (`gym-notes.db`), aberto uma única 
 - **Migrations versionadas** com `PRAGMA user_version`: cada migration roda em transação junto com a troca de
   versão (é aplicada por completo ou não muda nada). O banco nunca é apagado ou recriado em atualizações.
 - **Chaves estrangeiras ativas** e verificadas na abertura; `CHECK`s no banco reforçam as validações.
-- **Planejamento e execução separados:** o que você planeja (`workouts`, `exercises`) fica separado do que você
-  realmente fez (`workout_sessions`, `session_exercises`, `set_logs`). Ao iniciar um treino, nomes e valores
-  planejados são copiados para a sessão — editar ou excluir um treino depois **não altera o histórico**.
-- **Transações** nas operações com vários registros (iniciar sessão, duplicar treino, reordenar exercícios).
+- **Planejamento e execução separados:** o que você planeja (`training_programs`, `workouts`, `exercises`) fica
+  separado do que você realmente fez (`workout_sessions`, `session_exercises`, `set_logs`). Ao iniciar um treino,
+  nomes e valores planejados são copiados para a sessão — editar ou excluir um treino ou planejamento depois
+  **não altera o histórico**.
+- **Todo treino pertence a um planejamento:** a chave estrangeira `workouts.program_id` não tem exclusão em cascata
+  (o banco recusa excluir um planejamento que ainda tenha treinos) e triggers impedem treinos sem planejamento.
+  Na atualização para a versão 6 do banco, os treinos existentes foram associados a **“Meu planejamento”**,
+  preservando IDs, exercícios, ordem, sessões e histórico.
+- **Transações** nas operações com vários registros (iniciar sessão, duplicar treino ou planejamento, reordenar
+  treinos e exercícios, duplicar exercício, excluir planejamento).
 
 | Tabela | Conteúdo |
 | --- | --- |
-| `workouts` | Treinos |
+| `training_programs` | Planejamentos (nome, descrição opcional e ordem) |
+| `workouts` | Treinos de cada planejamento |
 | `exercises` | Exercícios planejados de cada treino |
 | `workout_sessions` | Execuções de um treino (em andamento ou concluídas) |
 | `session_exercises` | Exercícios de cada execução |
@@ -177,7 +201,11 @@ npx expo start
 
 1. Abra o **Expo Go** no celular (na mesma rede Wi-Fi do computador).
 2. Escaneie o QR Code exibido no terminal.
-3. O app abre com três treinos de exemplo (Treino A, B e C), que podem ser editados ou excluídos.
+3. O app abre com o planejamento **“Meu planejamento”**, que contém três treinos de exemplo (Treino A, B e C).
+   Todos podem ser editados ou excluídos.
+
+> Se o computador e o celular não estiverem na mesma rede, use `npx expo start --tunnel`
+> (requer `@expo/ngrok`, já incluído nas dependências de desenvolvimento).
 
 > No Expo Go, o ícone e a splash screen exibidos são os do próprio Expo Go. Os do Gym Notes aparecem no APK.
 
@@ -206,9 +234,10 @@ O perfil `production` gera um AAB (formato da Google Play) e não é necessário
 
 ## Testes
 
-Os testes cobrem as regras de negócio e o acesso a dados: inicialização e migrations do banco, CRUD de treinos e
-exercícios, duplicação, reordenação, execução e recuperação de sessões, cronômetro, histórico, estatísticas e
-evolução de cargas.
+Os testes cobrem as regras de negócio e o acesso a dados: inicialização e migrations do banco (incluindo a
+atualização de bancos antigos com dados reais), CRUD de planejamentos, treinos e exercícios, duplicação,
+reordenação, bloqueios de exclusão com treino em andamento, execução e recuperação de sessões, cronômetro,
+histórico, estatísticas e evolução de cargas.
 
 Eles rodam contra um **SQLite real** (o módulo `node:sqlite` do Node, com a mesma API usada pelo app),
 então migrations, chaves estrangeiras, `CHECK`s e transações são de fato exercitados. Reinícios do app são
@@ -228,6 +257,8 @@ solicita nenhuma permissão ao usuário.
 
 Ideias em avaliação para as próximas versões (ainda **não** implementadas):
 
+- Compartilhamento de planejamentos por código (somente a estrutura e a prescrição dos treinos — nunca histórico,
+  cargas realizadas ou estatísticas). A importação criará sempre uma cópia independente.
 - Exportação e importação de dados (backup).
 - Publicação na Google Play.
 

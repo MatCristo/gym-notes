@@ -1,4 +1,4 @@
-import { cleanupDatabases, closeApp, localIso, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
+import { cleanupDatabases, closeApp, listDefaultWorkouts, localIso, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
 
 type SetPlan = ({ actualReps: number; actualWeightKg: number } | null)[];
 
@@ -28,7 +28,7 @@ describe('historyService', () => {
 
   beforeEach(async () => {
     app = startApp();
-    const [A, B] = await app.workouts.workoutService.listWorkouts();
+    const [A, B] = await listDefaultWorkouts(app);
     const { exerciseService } = app.exercises;
     await exerciseService.createExercise(A!.id, { name: 'Supino reto', sets: 3, reps: 10, weightKg: 100, restSeconds: 90 });
     await exerciseService.createExercise(A!.id, { name: 'Flexão', sets: 2, reps: 15, weightKg: 0, restSeconds: 60 });
@@ -74,6 +74,11 @@ describe('historyService', () => {
       await app.exercises.exerciseService.updateExercise(exercises[0]!.id, { name: 'Supino máquina', sets: 5, reps: 5, weightKg: 999, restSeconds: 10 });
       await app.workouts.workoutService.renameWorkout(ids.A, 'Treino A — novo');
       app = await restartApp(app);
+      // O Treino A tem uma sessão em andamento: a exclusão é bloqueada até ela ser finalizada.
+      await expect(app.workouts.workoutService.deleteWorkout(ids.A)).rejects.toMatchObject({
+        code: 'has-session-in-progress',
+      });
+      await app.sessions.sessionService.finishSession(ids.live);
       await app.workouts.workoutService.deleteWorkout(ids.A);
 
       const details = (await app.sessions.sessionService.getSessionDetails(ids.s1))!;
@@ -84,7 +89,8 @@ describe('historyService', () => {
         [100, 42.5, true],
         [100, null, false],
       ]);
-      expect(await app.history.historyService.listCompletedSessions()).toHaveLength(4);
+      // As 4 sessões concluídas antes + a que estava em andamento (finalizada acima).
+      expect(await app.history.historyService.listCompletedSessions()).toHaveLength(5);
     });
   });
 

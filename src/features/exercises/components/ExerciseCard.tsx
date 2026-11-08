@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useIsActive, useReorderableDrag } from 'react-native-reorderable-list';
 
+import { GripDots } from '@/components/ui/GripDots';
 import type { Exercise } from '@/features/exercises/types/exercise.types';
 import { formatExercisePlan, formatRest } from '@/features/exercises/utils/exercise.format';
 import { colors } from '@/theme/colors';
@@ -21,19 +22,6 @@ interface ExerciseCardProps {
 
 /** Tempo segurando a alça para começar a arrastar (curto, mas evita arrastar ao rolar a lista). */
 const HANDLE_DRAG_DELAY_MS = 150;
-
-function GripDots() {
-  return (
-    <View style={styles.grip}>
-      {[0, 1, 2].map((row) => (
-        <View key={row} style={styles.gripRow}>
-          <View style={styles.gripDot} />
-          <View style={styles.gripDot} />
-        </View>
-      ))}
-    </View>
-  );
-}
 
 /** Card de exercício para a lista reordenável. Deve ser renderizado dentro de `ReorderableList`. */
 function ExerciseCardComponent({ exercise, position, onPress, onOptionsPress, draggable }: ExerciseCardProps) {
@@ -137,19 +125,6 @@ const styles = StyleSheet.create({
   },
   positionTextActive: {
     color: colors.onPrimary,
-  },
-  grip: {
-    gap: 3,
-  },
-  gripRow: {
-    flexDirection: 'row',
-    gap: 3,
-  },
-  gripDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: colors.textSecondary,
   },
   info: {
     flex: 1,

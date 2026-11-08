@@ -10,6 +10,7 @@ import {
   type ExerciseInput,
 } from '@/features/exercises/types/exercise.types';
 import { workoutRepository } from '@/features/workouts/repositories/workout.repository';
+import { isPermutationOf } from '@/utils/move-item';
 import {
   formatNumberForInput,
   parseNumberInput,
@@ -143,12 +144,7 @@ export const exerciseService = {
   async reorderExercises(workoutId: string, orderedIds: readonly string[]): Promise<void> {
     await runInTransaction(async () => {
       const current = await exerciseRepository.findByWorkoutId(workoutId);
-      const currentIds = new Set(current.map((exercise) => exercise.id));
-      const isPermutation =
-        orderedIds.length === current.length &&
-        new Set(orderedIds).size === orderedIds.length &&
-        orderedIds.every((id) => currentIds.has(id));
-      if (!isPermutation) {
+      if (!isPermutationOf(orderedIds, current.map((exercise) => exercise.id))) {
         throw new ExerciseServiceError('invalid-order', 'A lista de exercícios mudou. Recarregue e tente novamente.');
       }
 
@@ -156,6 +152,46 @@ export const exerciseService = {
       for (const [index, id] of orderedIds.entries()) {
         if (currentOrder.get(id) !== index) await exerciseRepository.updateSortOrder(id, workoutId, index);
       }
+    });
+  },
+
+  /**
+   * Duplica o exercício no mesmo treino, logo abaixo do original, em uma única transação.
+   * Copia nome e prescrição (séries, repetições, carga e descanso) com novo UUID; a lista do
+   * treino é renumerada (0..n-1). O original e as sessões/histórico não são alterados.
+   */
+  async duplicateExercise(id: string): Promise<Exercise> {
+    return runInTransaction(async () => {
+      const original = await exerciseRepository.findById(id);
+      if (!original) throw new ExerciseServiceError('not-found', 'Exercício não encontrado.');
+
+      const current = await exerciseRepository.findByWorkoutId(original.workoutId);
+      const originalIndex = current.findIndex((exercise) => exercise.id === id);
+      const copyId = randomUUID();
+      const copyIndex = originalIndex + 1;
+
+      // Abre espaço: quem estava depois do original desce uma posição (e corrige eventuais buracos).
+      for (const [index, exercise] of current.entries()) {
+        const target = index < copyIndex ? index : index + 1;
+        if (exercise.sortOrder !== target) {
+          await exerciseRepository.updateSortOrder(exercise.id, original.workoutId, target);
+        }
+      }
+      await exerciseRepository.insert({
+        id: copyId,
+        workoutId: original.workoutId,
+        name: original.name,
+        sets: original.sets,
+        reps: original.reps,
+        weightKg: original.weightKg,
+        restSeconds: original.restSeconds,
+        sortOrder: copyIndex,
+        createdAt: new Date().toISOString(),
+      });
+
+      const copy = await exerciseRepository.findById(copyId);
+      if (!copy) throw new Error('Cópia do exercício não foi encontrada no banco.');
+      return copy;
     });
   },
 

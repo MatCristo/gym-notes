@@ -1,6 +1,10 @@
 import type { ReactElement } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View, type ListRenderItem } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { LinearTransition } from 'react-native-reanimated';
+import ReorderableList, {
+  type ReorderableListReorderEvent,
+  type ReorderableListRenderItem,
+} from 'react-native-reorderable-list';
 
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { WorkoutCard } from '@/features/workouts/components/WorkoutCard';
@@ -18,16 +22,16 @@ interface WorkoutListProps {
   /** Estado do carregamento. Enquanto não estiver `ready`, a lista exibe loading ou erro. */
   status: WorkoutsStatus;
   onRetryPress: () => void;
+  /** Disparado ao soltar um treino em outra posição. */
+  onReorder: (from: number, to: number) => void;
+  /** IDs dos treinos com sessão em andamento (exibem o indicador "Em andamento"). */
+  inProgressWorkoutIds?: ReadonlySet<string>;
   /** Conteúdo exibido acima da lista (rola junto com os itens). */
   header?: ReactElement;
 }
 
 function keyExtractor(workout: Workout): string {
   return workout.id;
-}
-
-function ItemSeparator() {
-  return <View style={styles.separator} />;
 }
 
 interface EmptyStateProps {
@@ -41,10 +45,10 @@ function WorkoutListEmptyState({ onCreateWorkoutPress }: EmptyStateProps) {
         <Text style={styles.emptyBadgeText}>0</Text>
       </View>
       <Text style={styles.emptyTitle} accessibilityRole="header">
-        Nenhum treino por aqui
+        Nenhum treino neste planejamento
       </Text>
       <Text style={styles.emptyDescription}>
-        Crie seu primeiro treino para começar a organizar sua rotina de musculação.
+        Crie o primeiro treino (ex.: Treino A, Treino B…) para organizar este planejamento.
       </Text>
       <PrimaryButton
         label="Criar primeiro treino"
@@ -90,9 +94,12 @@ export function WorkoutList({
   onCreateWorkoutPress,
   status,
   onRetryPress,
+  onReorder,
+  inProgressWorkoutIds,
   header,
 }: WorkoutListProps) {
-  const data = status === 'ready' ? workouts : [];
+  const data = status === 'ready' ? [...workouts] : [];
+  const draggable = data.length > 1;
   const emptyComponent =
     status === 'loading' ? (
       <WorkoutListLoadingState />
@@ -102,18 +109,29 @@ export function WorkoutList({
       <WorkoutListEmptyState onCreateWorkoutPress={onCreateWorkoutPress} />
     );
 
-  const renderItem: ListRenderItem<Workout> = ({ item }) => (
-    <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(160)}>
-      <WorkoutCard workout={item} onPress={onWorkoutPress} onOptionsPress={onWorkoutOptionsPress} />
-    </Animated.View>
+  const renderItem: ReorderableListRenderItem<Workout> = ({ item }) => (
+    <WorkoutCard
+      workout={item}
+      onPress={onWorkoutPress}
+      onOptionsPress={onWorkoutOptionsPress}
+      draggable={draggable}
+      inProgress={inProgressWorkoutIds?.has(item.id) ?? false}
+    />
   );
 
+  const handleReorder = ({ from, to }: ReorderableListReorderEvent) => {
+    if (from !== to) onReorder(from, to);
+  };
+
   return (
-    <Animated.FlatList
+    <ReorderableList
       data={data}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
-      ItemSeparatorComponent={ItemSeparator}
+      onReorder={handleReorder}
+      dragEnabled={draggable}
+      // Necessário para o destaque visual do card enquanto é arrastado (useIsActive).
+      shouldUpdateActiveItem
       // Ao criar, duplicar ou excluir, os demais cards se reacomodam suavemente.
       itemLayoutAnimation={LinearTransition.duration(200)}
       ListHeaderComponent={header}
@@ -132,9 +150,6 @@ const styles = StyleSheet.create({
   },
   contentEmpty: {
     flexGrow: 1,
-  },
-  separator: {
-    height: spacing.md,
   },
   emptyState: {
     flex: 1,

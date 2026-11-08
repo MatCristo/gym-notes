@@ -1,5 +1,7 @@
 export interface Workout {
   id: string;
+  /** Planejamento ao qual o treino pertence. */
+  programId: string;
   name: string;
   exerciseCount: number;
   /** ISO 8601 */

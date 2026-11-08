@@ -2,8 +2,12 @@ import { randomUUID } from 'expo-crypto';
 
 import { runInTransaction } from '@/database/database';
 import { exerciseRepository } from '@/features/exercises/repositories/exercise.repository';
+import { programRepository } from '@/features/programs/repositories/program.repository';
+import { sessionRepository } from '@/features/sessions/repositories/session.repository';
 import { workoutRepository } from '@/features/workouts/repositories/workout.repository';
 import { WORKOUT_NAME_MAX_LENGTH, type Workout } from '@/features/workouts/types/workout.types';
+import { buildCopyName as buildCopyNameWithLimit } from '@/utils/copy-name';
+import { isPermutationOf } from '@/utils/move-item';
 
 export type WorkoutNameValidationError = 'empty' | 'too-long';
 
@@ -18,7 +22,12 @@ export function validateWorkoutName(rawName: string): WorkoutNameValidationError
   return null;
 }
 
-export type WorkoutServiceErrorCode = 'invalid-name' | 'not-found';
+export type WorkoutServiceErrorCode =
+  | 'invalid-name'
+  | 'not-found'
+  | 'program-not-found'
+  | 'invalid-order'
+  | 'has-session-in-progress';
 
 export class WorkoutServiceError extends Error {
   constructor(
@@ -30,12 +39,9 @@ export class WorkoutServiceError extends Error {
   }
 }
 
-const COPY_SUFFIX = ' (Cópia)';
-
 /** "Treino A" → "Treino A (Cópia)", cortando o original se necessário para respeitar o limite. */
 export function buildCopyName(name: string): string {
-  const base = name.slice(0, WORKOUT_NAME_MAX_LENGTH - COPY_SUFFIX.length).trimEnd();
-  return `${base}${COPY_SUFFIX}`;
+  return buildCopyNameWithLimit(name, WORKOUT_NAME_MAX_LENGTH);
 }
 
 function assertValidName(rawName: string): string {
@@ -46,21 +52,67 @@ function assertValidName(rawName: string): string {
   return normalizeWorkoutName(rawName);
 }
 
+export interface CopyWorkoutOptions {
+  /** Planejamento que recebe a cópia. */
+  programId: string;
+  name: string;
+  createdAt: string;
+  /** Posição explícita; se omitida, a cópia vai para o fim do planejamento. */
+  sortOrder?: number;
+}
+
+/**
+ * Copia um treino e todos os seus exercícios planejados (novos UUIDs; mesma prescrição e ordem).
+ * Sessões, séries registradas e histórico NUNCA são copiados.
+ * Não abre transação própria: DEVE ser chamada dentro de `runInTransaction`.
+ */
+export async function copyWorkoutStructure(source: Workout, options: CopyWorkoutOptions): Promise<string> {
+  const copyId = randomUUID();
+  await workoutRepository.insert({
+    id: copyId,
+    programId: options.programId,
+    name: options.name,
+    createdAt: options.createdAt,
+    sortOrder: options.sortOrder,
+  });
+
+  const exercises = await exerciseRepository.findByWorkoutId(source.id);
+  for (const exercise of exercises) {
+    await exerciseRepository.insert({
+      id: randomUUID(),
+      workoutId: copyId,
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: exercise.reps,
+      weightKg: exercise.weightKg,
+      restSeconds: exercise.restSeconds,
+      sortOrder: exercise.sortOrder,
+      createdAt: options.createdAt,
+    });
+  }
+  return copyId;
+}
+
 /** Regras de negócio dos treinos. Toda leitura/escrita passa pelo repository. */
 export const workoutService = {
-  listWorkouts(): Promise<Workout[]> {
-    return workoutRepository.findAll();
+  /** Treinos de um planejamento, na ordem definida pelo usuário. */
+  listWorkouts(programId: string): Promise<Workout[]> {
+    return workoutRepository.findByProgramId(programId);
   },
 
   getWorkout(id: string): Promise<Workout | null> {
     return workoutRepository.findById(id);
   },
 
-  /** Cria o treino e retorna o registro como ficou salvo no banco. */
-  async createWorkout(rawName: string): Promise<Workout> {
+  /** Cria o treino no fim do planejamento informado e retorna o registro como ficou salvo no banco. */
+  async createWorkout(programId: string, rawName: string): Promise<Workout> {
     const name = assertValidName(rawName);
+    // A FK garante a integridade; a checagem prévia só gera um erro mais claro.
+    if (!(await programRepository.findById(programId))) {
+      throw new WorkoutServiceError('program-not-found', 'Planejamento não encontrado.');
+    }
     const id = randomUUID();
-    await workoutRepository.insert({ id, name, createdAt: new Date().toISOString() });
+    await workoutRepository.insert({ id, programId, name, createdAt: new Date().toISOString() });
 
     const created = await workoutRepository.findById(id);
     if (!created) throw new Error('Treino criado não foi encontrado no banco.');
@@ -82,32 +134,19 @@ export const workoutService = {
 
   /**
    * Duplica o treino e todos os seus exercícios em uma única transação (tudo ou nada).
-   * Gera novos UUIDs e timestamps; preserva séries, repetições, carga, descanso e ordem.
-   * Sessões e histórico de execução NÃO são copiados.
+   * A cópia fica no MESMO planejamento, no fim da lista. Gera novos UUIDs e timestamps;
+   * preserva séries, repetições, carga, descanso e ordem. Sessões e histórico NÃO são copiados.
    */
   async duplicateWorkout(id: string): Promise<Workout> {
     return runInTransaction(async () => {
       const original = await workoutRepository.findById(id);
       if (!original) throw new WorkoutServiceError('not-found', 'Treino não encontrado.');
 
-      const copyId = randomUUID();
-      const now = new Date().toISOString();
-      await workoutRepository.insert({ id: copyId, name: buildCopyName(original.name), createdAt: now });
-
-      const exercises = await exerciseRepository.findByWorkoutId(id);
-      for (const exercise of exercises) {
-        await exerciseRepository.insert({
-          id: randomUUID(),
-          workoutId: copyId,
-          name: exercise.name,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          weightKg: exercise.weightKg,
-          restSeconds: exercise.restSeconds,
-          sortOrder: exercise.sortOrder,
-          createdAt: now,
-        });
-      }
+      const copyId = await copyWorkoutStructure(original, {
+        programId: original.programId,
+        name: buildCopyName(original.name),
+        createdAt: new Date().toISOString(),
+      });
 
       const copy = await workoutRepository.findById(copyId);
       if (!copy) throw new Error('Cópia do treino não foi encontrada no banco.');
@@ -115,8 +154,41 @@ export const workoutService = {
     });
   },
 
-  /** Exclui pelo ID. Excluir um treino que já não existe não é tratado como erro. */
+  /**
+   * Persiste a nova ordem (sort_order = posição em `orderedIds`) em uma única transação.
+   * `orderedIds` deve conter exatamente os treinos atuais do planejamento; treinos de outros
+   * planejamentos nunca são alterados.
+   */
+  async reorderWorkouts(programId: string, orderedIds: readonly string[]): Promise<void> {
+    await runInTransaction(async () => {
+      const current = await workoutRepository.findByProgramId(programId);
+      if (!isPermutationOf(orderedIds, current.map((workout) => workout.id))) {
+        throw new WorkoutServiceError('invalid-order', 'A lista de treinos mudou. Recarregue e tente novamente.');
+      }
+
+      const currentOrder = new Map(current.map((workout) => [workout.id, workout.sortOrder]));
+      for (const [index, id] of orderedIds.entries()) {
+        if (currentOrder.get(id) !== index) await workoutRepository.updateSortOrder(id, programId, index);
+      }
+    });
+  },
+
+  /**
+   * Exclui o treino (e seus exercícios planejados) pelo ID.
+   * Bloqueia com `has-session-in-progress` se o treino tiver uma sessão em andamento: sem isso,
+   * a FK (ON DELETE SET NULL) desvincularia a sessão do treino e do planejamento.
+   * Sessões concluídas e histórico são preservados. Excluir um treino que já não existe não é erro.
+   */
   async deleteWorkout(id: string): Promise<void> {
-    await workoutRepository.delete(id);
+    await runInTransaction(async () => {
+      // Mesma fila de transações de `startSession`: não há corrida entre a checagem e a exclusão.
+      if (await sessionRepository.findInProgressByWorkoutId(id)) {
+        throw new WorkoutServiceError(
+          'has-session-in-progress',
+          'Este treino está em andamento. Finalize-o antes de excluir.',
+        );
+      }
+      await workoutRepository.delete(id);
+    });
   },
 };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { exerciseService } from '@/features/exercises/services/exercise.service';
 import type { Exercise, ExerciseInput } from '@/features/exercises/types/exercise.types';
+import { moveItem } from '@/utils/move-item';
 
 export type ExercisesStatus = 'loading' | 'ready' | 'error';
 
@@ -14,18 +15,13 @@ export interface UseExercisesResult {
   updateExercise: (id: string, input: ExerciseInput) => Promise<Exercise>;
   /** Rejeita se o banco falhar (a lista não é alterada nesse caso). */
   deleteExercise: (id: string) => Promise<void>;
+  /** Duplica logo abaixo do original. Resolve com a cópia; a lista é relida do banco (nova ordem). */
+  duplicateExercise: (id: string) => Promise<Exercise>;
   /**
    * Move o exercício de `from` para `to`. A lista muda na hora (otimista) e a ordem é
    * gravada no SQLite; se a gravação falhar, a lista é recarregada do banco e o erro é repassado.
    */
   reorderExercises: (from: number, to: number) => Promise<void>;
-}
-
-function moveItem<T>(items: readonly T[], from: number, to: number): T[] {
-  const next = [...items];
-  const [moved] = next.splice(from, 1);
-  if (moved !== undefined) next.splice(to, 0, moved);
-  return next;
 }
 
 /**
@@ -83,6 +79,25 @@ export function useExercises(workoutId: string): UseExercisesResult {
     setExercises((current) => current.filter((exercise) => exercise.id !== id));
   }, []);
 
+  const duplicateExercise = useCallback(
+    async (id: string) => {
+      const copy = await exerciseService.duplicateExercise(id);
+      try {
+        setExercises(await exerciseService.listByWorkout(workoutId));
+      } catch {
+        // A cópia já foi salva; se a releitura falhar, insere localmente logo após o original.
+        setExercises((current) => {
+          const index = current.findIndex((exercise) => exercise.id === id);
+          const next = [...current];
+          next.splice(index + 1, 0, copy);
+          return next;
+        });
+      }
+      return copy;
+    },
+    [workoutId],
+  );
+
   const reorderExercises = useCallback(
     async (from: number, to: number) => {
       if (from === to || from < 0 || to < 0 || from >= exercises.length || to >= exercises.length) return;
@@ -106,5 +121,14 @@ export function useExercises(workoutId: string): UseExercisesResult {
     [exercises, workoutId],
   );
 
-  return { exercises, status, reload, createExercise, updateExercise, deleteExercise, reorderExercises };
+  return {
+    exercises,
+    status,
+    reload,
+    createExercise,
+    updateExercise,
+    deleteExercise,
+    duplicateExercise,
+    reorderExercises,
+  };
 }

@@ -1,6 +1,15 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { cleanupDatabases, closeApp, newDatabasePath, restartApp, startApp, type TestApp } from '../../../test/helpers/app';
+import {
+  cleanupDatabases,
+  closeApp,
+  defaultProgramId,
+  listDefaultWorkouts,
+  newDatabasePath,
+  restartApp,
+  startApp,
+  type TestApp,
+} from '../../../test/helpers/app';
 
 const count = async (db: SQLiteDatabase, sql: string, params: (string | number)[] = []) =>
   (await db.getFirstAsync<{ n: number }>(sql, params))!.n;
@@ -28,7 +37,14 @@ describe('inicialização do banco e migrations', () => {
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
       )
     ).map((row) => row.name);
-    expect(tables).toEqual(['exercises', 'session_exercises', 'set_logs', 'workout_sessions', 'workouts']);
+    expect(tables).toEqual([
+      'exercises',
+      'session_exercises',
+      'set_logs',
+      'training_programs',
+      'workout_sessions',
+      'workouts',
+    ]);
 
     const exerciseFks = await db.getAllAsync<{ table: string; on_delete: string }>('PRAGMA foreign_key_list(exercises)');
     expect(exerciseFks).toEqual([expect.objectContaining({ table: 'workouts', on_delete: 'CASCADE' })]);
@@ -40,7 +56,7 @@ describe('inicialização do banco e migrations', () => {
 
   it('insere os treinos de demonstração uma única vez, mesmo após reinícios', async () => {
     app = startApp();
-    expect((await app.workouts.workoutService.listWorkouts()).map((w) => w.name)).toEqual([
+    expect((await listDefaultWorkouts(app)).map((w) => w.name)).toEqual([
       'Treino A',
       'Treino B',
       'Treino C',
@@ -48,16 +64,16 @@ describe('inicialização do banco e migrations', () => {
 
     app = await restartApp(app);
     app = await restartApp(app);
-    expect(await app.workouts.workoutService.listWorkouts()).toHaveLength(3);
+    expect(await listDefaultWorkouts(app)).toHaveLength(3);
   });
 
   it('se o usuário excluir todos os treinos, os de demonstração não voltam', async () => {
     app = startApp();
-    for (const workout of await app.workouts.workoutService.listWorkouts()) {
+    for (const workout of await listDefaultWorkouts(app)) {
       await app.workouts.workoutService.deleteWorkout(workout.id);
     }
     app = await restartApp(app);
-    expect(await app.workouts.workoutService.listWorkouts()).toEqual([]);
+    expect(await listDefaultWorkouts(app)).toEqual([]);
   });
 
   it('atualiza um banco antigo (versão 2) sem perder dados do usuário', async () => {
@@ -81,7 +97,7 @@ describe('inicialização do banco e migrations', () => {
     expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(
       app.migrations.LATEST_DATABASE_VERSION,
     );
-    const names = (await app.workouts.workoutService.listWorkouts()).map((w) => w.name);
+    const names = (await listDefaultWorkouts(app)).map((w) => w.name);
     expect(names).toEqual(['Treino A', 'Pernas (meu treino)', 'Treino C']);
   });
 
@@ -139,7 +155,145 @@ describe('inicialização do banco e migrations', () => {
     await fix.execAsync('PRAGMA user_version = 0;');
     await fix.closeAsync();
     await expect(app.database.getDatabase()).resolves.toBeDefined();
-    expect(await app.workouts.workoutService.listWorkouts()).toHaveLength(3);
+    expect(await listDefaultWorkouts(app)).toHaveLength(3);
+  });
+
+  describe('migration v6 (planejamentos)', () => {
+    const rawSqlite = () =>
+      jest.requireActual<typeof import('../../../test/mocks/expo-sqlite')>('../../../test/mocks/expo-sqlite');
+
+    it('em banco novo cria "Meu planejamento" com os treinos de demonstração e FK sem cascata', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+
+      const programs = await app.programs.programService.listPrograms();
+      expect(programs).toHaveLength(1);
+      expect(programs[0]).toMatchObject({ name: 'Meu planejamento', description: null, workoutCount: 3, sortOrder: 0 });
+      expect((await listDefaultWorkouts(app)).map((w) => w.name)).toEqual(['Treino A', 'Treino B', 'Treino C']);
+      expect(await count(db, 'SELECT COUNT(*) AS n FROM workouts WHERE program_id IS NULL')).toBe(0);
+
+      const workoutFks = await db.getAllAsync<{ table: string; from: string; on_delete: string }>(
+        'PRAGMA foreign_key_list(workouts)',
+      );
+      expect(workoutFks).toEqual([
+        expect.objectContaining({ table: 'training_programs', from: 'program_id', on_delete: 'NO ACTION' }),
+      ]);
+    });
+
+    it('o banco recusa treino sem planejamento e exclusão de planejamento com treinos', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+      const programId = await defaultProgramId(app);
+      const now = new Date().toISOString();
+
+      await expect(
+        db.runAsync('INSERT INTO workouts (id, name, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, 0)', [
+          'w-sem-plano',
+          'X',
+          now,
+          now,
+        ]),
+      ).rejects.toThrow(/program_id é obrigatório/);
+      await expect(db.runAsync('UPDATE workouts SET program_id = NULL')).rejects.toThrow(/program_id é obrigatório/);
+      await expect(
+        db.runAsync(
+          'INSERT INTO workouts (id, program_id, name, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, 0)',
+          ['w-plano-inexistente', 'nao-existe', 'X', now, now],
+        ),
+      ).rejects.toThrow(/FOREIGN KEY/);
+      await expect(db.runAsync('DELETE FROM training_programs WHERE id = ?', [programId])).rejects.toThrow(
+        /FOREIGN KEY/,
+      );
+      expect(await listDefaultWorkouts(app)).toHaveLength(3);
+    });
+
+    it('migra um banco v5 com dados reais sem perder treinos, exercícios, histórico ou sessão em andamento', async () => {
+      const dbPath = newDatabasePath();
+      app = startApp(dbPath);
+      const raw = await rawSqlite().openDatabaseAsync('v5');
+      await raw.execAsync('PRAGMA foreign_keys = ON;');
+      for (const migration of app.migrations.MIGRATIONS.filter((m) => m.version <= 5)) {
+        await migration.up(raw as unknown as SQLiteDatabase);
+      }
+      await raw.execAsync('PRAGMA user_version = 5');
+      const before = await raw.getAllAsync<{ id: string; name: string }>(
+        'SELECT id, name FROM workouts ORDER BY sort_order',
+      );
+      // Ordem personalizada e com buracos (como fica após exclusões/reordenações na versão 5).
+      await raw.runAsync("UPDATE workouts SET sort_order = 7 WHERE name = 'Treino A'");
+      await raw.runAsync("UPDATE workouts SET sort_order = 2 WHERE name = 'Treino C'");
+      const wa = before[0]!.id;
+      const wb = before[1]!.id;
+      const t = '2026-10-01T10:00:00.000Z';
+      await raw.runAsync(
+        `INSERT INTO exercises (id, workout_id, name, sets, reps, weight, rest_seconds, sort_order, created_at, updated_at)
+         VALUES ('ex-1', ?, 'Supino', 3, 10, 40, 90, 0, ?, ?), ('ex-2', ?, 'Remada', 2, 12, 30, 60, 0, ?, ?)`,
+        [wa, t, t, wb, t, t],
+      );
+      // Sessão concluída (histórico) do Treino A e sessão em andamento do Treino B.
+      await raw.runAsync(
+        `INSERT INTO workout_sessions (id, workout_id, workout_name_snapshot, started_at, completed_at, status)
+         VALUES ('s-done', ?, 'Treino A', ?, ?, 'completed'), ('s-live', ?, 'Treino B', ?, NULL, 'in_progress')`,
+        [wa, t, '2026-10-01T11:00:00.000Z', wb, t],
+      );
+      await raw.runAsync(
+        `INSERT INTO session_exercises (id, session_id, exercise_id, exercise_name_snapshot, planned_rest_seconds, sort_order)
+         VALUES ('se-done', 's-done', 'ex-1', 'Supino', 90, 0), ('se-live', 's-live', 'ex-2', 'Remada', 60, 0)`,
+      );
+      await raw.runAsync(
+        `INSERT INTO set_logs (id, session_exercise_id, set_number, planned_reps, actual_reps, planned_weight, actual_weight, completed_at)
+         VALUES ('sl-1', 'se-done', 1, 10, 10, 40, 42.5, ?), ('sl-2', 'se-live', 1, 12, 12, 30, 32, ?)`,
+        [t, t],
+      );
+      await raw.closeAsync();
+
+      app = startApp(dbPath);
+      const db = await app.database.getDatabase();
+      expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(6);
+
+      const programs = await app.programs.programService.listPrograms();
+      expect(programs.map((p) => [p.name, p.workoutCount])).toEqual([['Meu planejamento', 3]]);
+      // Mesmos IDs, nomes e ordem.
+      const workouts = await listDefaultWorkouts(app);
+      expect(workouts.map((w) => [w.name, w.sortOrder])).toEqual([
+        ['Treino B', 1],
+        ['Treino C', 2],
+        ['Treino A', 7],
+      ]);
+      expect(new Set(workouts.map((w) => w.id))).toEqual(new Set(before.map((w) => w.id)));
+      expect(workouts.every((w) => w.programId === programs[0]!.id)).toBe(true);
+      expect((await app.exercises.exerciseService.listByWorkout(wa)).map((e) => [e.id, e.weightKg])).toEqual([
+        ['ex-1', 40],
+      ]);
+
+      // Histórico, estatísticas e evolução continuam iguais.
+      expect((await app.history.historyService.listCompletedSessions()).map((h) => h.id)).toEqual(['s-done']);
+      const progress = await app.history.historyService.getExerciseProgress('Supino');
+      expect(progress.points).toHaveLength(1);
+      expect((await app.history.historyService.getTrainingStats()).totalSessions).toBe(1);
+
+      // A sessão em andamento continua retomável, com o que já foi registrado.
+      expect(await app.sessions.sessionService.startSession(wb)).toEqual({ sessionId: 's-live', resumed: true });
+      const live = (await app.sessions.sessionService.getSessionDetails('s-live'))!;
+      expect(live.exercises[0]!.sets[0]).toMatchObject({ actualWeightKg: 32, actualReps: 12 });
+      expect(await count(db, 'SELECT COUNT(*) AS n FROM set_logs')).toBe(2);
+    });
+
+    it('reexecutar a migration v6 não duplica o planejamento padrão nem altera os dados', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+      const programId = await defaultProgramId(app);
+      const v6 = app.migrations.MIGRATIONS.find((m) => m.version === 6)!;
+
+      await db.withTransactionAsync(() => v6.up(db));
+
+      expect(await count(db, 'SELECT COUNT(*) AS n FROM training_programs')).toBe(1);
+      expect(await defaultProgramId(app)).toBe(programId);
+      expect(await count(db, 'SELECT COUNT(*) AS n FROM workouts WHERE program_id = ?', [programId])).toBe(3);
+
+      app = await restartApp(app);
+      expect(await app.programs.programService.listPrograms()).toHaveLength(1);
+    });
   });
 
   it('valida que as versões das migrations são sequenciais', () => {

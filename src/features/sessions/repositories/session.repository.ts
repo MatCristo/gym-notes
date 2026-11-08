@@ -125,6 +125,19 @@ export const sessionRepository = {
     return row ? mapSession(row) : null;
   },
 
+  /** Quantas sessões em andamento pertencem a treinos do planejamento informado. */
+  async countInProgressByProgramId(programId: string): Promise<number> {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ total: number }>(
+      `SELECT COUNT(*) AS total
+         FROM workout_sessions ws
+         JOIN workouts w ON w.id = ws.workout_id
+        WHERE w.program_id = ? AND ws.status = 'in_progress'`,
+      [programId],
+    );
+    return row?.total ?? 0;
+  },
+
   async findAllInProgress(): Promise<WorkoutSession[]> {
     const db = await getDatabase();
     const rows = await db.getAllAsync<WorkoutSessionRow>(

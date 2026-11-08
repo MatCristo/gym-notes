@@ -31,8 +31,16 @@ type OverlayState =
 export default function WorkoutDetailsScreen() {
   const { id, name: nameParam } = useLocalSearchParams<'/workout/[id]', { name?: string }>();
   const { workout, status: workoutStatus, reload: reloadWorkout } = useWorkout(id);
-  const { exercises, status, reload, createExercise, updateExercise, deleteExercise, reorderExercises } =
-    useExercises(id);
+  const {
+    exercises,
+    status,
+    reload,
+    createExercise,
+    updateExercise,
+    deleteExercise,
+    duplicateExercise,
+    reorderExercises,
+  } = useExercises(id);
   const toast = useToast();
 
   const [overlay, setOverlay] = useState<OverlayState>({ type: 'none' });
@@ -117,6 +125,20 @@ export default function WorkoutDetailsScreen() {
     } catch {
       setOverlay({ type: 'none' });
       toast.show('Não foi possível excluir o exercício. Tente novamente.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDuplicate = async (exercise: Exercise) => {
+    if (isSaving) return;
+    setOverlay({ type: 'none' });
+    setIsSaving(true);
+    try {
+      await duplicateExercise(exercise.id);
+      toast.show('Exercício duplicado');
+    } catch {
+      toast.show('Não foi possível duplicar o exercício. Nada foi alterado.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -247,6 +269,7 @@ export default function WorkoutDetailsScreen() {
           visible
           exercise={overlay.exercise}
           onEdit={openEditForm}
+          onDuplicate={handleDuplicate}
           onViewProgress={(exercise) => {
             setOverlay({ type: 'none' });
             router.push({ pathname: '/exercise-progress', params: { name: exercise.name } });

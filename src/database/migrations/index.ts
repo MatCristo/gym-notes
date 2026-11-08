@@ -128,6 +128,59 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    description: 'Cria training_programs e associa todos os treinos existentes a "Meu planejamento"',
+    up: async (db) => {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS training_programs (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+          description TEXT,
+          sort_order INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_training_programs_sort_order ON training_programs (sort_order);
+      `);
+
+      // `workouts` NÃO é recriada (preserva IDs e as FKs de exercises/workout_sessions).
+      // A FK não tem ON DELETE: o banco recusa excluir um planejamento que ainda tenha treinos,
+      // então nenhuma exclusão acidental apaga treinos em cascata.
+      const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(workouts)');
+      if (!columns.some((column) => column.name === 'program_id')) {
+        await db.execAsync('ALTER TABLE workouts ADD COLUMN program_id TEXT REFERENCES training_programs (id)');
+      }
+
+      // Planejamento padrão: criado uma única vez (não duplica se a migration for reexecutada).
+      const existing = await db.getFirstAsync<{ id: string }>(
+        'SELECT id FROM training_programs ORDER BY sort_order ASC, created_at ASC LIMIT 1',
+      );
+      let defaultProgramId = existing?.id;
+      if (defaultProgramId === undefined) {
+        defaultProgramId = randomUUID();
+        const now = new Date().toISOString();
+        await db.runAsync(
+          'INSERT INTO training_programs (id, name, description, sort_order, created_at, updated_at) VALUES (?, ?, NULL, 0, ?, ?)',
+          [defaultProgramId, 'Meu planejamento', now, now],
+        );
+      }
+      // Nomes, IDs, exercícios, ordem e sessões dos treinos não são tocados: só ganham o planejamento.
+      await db.runAsync('UPDATE workouts SET program_id = ? WHERE program_id IS NULL', [defaultProgramId]);
+
+      await db.execAsync(`
+        CREATE INDEX IF NOT EXISTS idx_workouts_program_id ON workouts (program_id, sort_order);
+        -- O SQLite não permite ADD COLUMN NOT NULL com FK; os triggers garantem que todo treino
+        -- pertença a um planejamento (a FK garante que ele exista).
+        CREATE TRIGGER IF NOT EXISTS trg_workouts_program_required_insert
+          BEFORE INSERT ON workouts WHEN NEW.program_id IS NULL
+          BEGIN SELECT RAISE(ABORT, 'workouts.program_id é obrigatório'); END;
+        CREATE TRIGGER IF NOT EXISTS trg_workouts_program_required_update
+          BEFORE UPDATE OF program_id ON workouts WHEN NEW.program_id IS NULL
+          BEGIN SELECT RAISE(ABORT, 'workouts.program_id é obrigatório'); END;
+      `);
+    },
+  },
 ];
 
 export const LATEST_DATABASE_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

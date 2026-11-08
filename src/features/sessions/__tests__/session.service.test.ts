@@ -1,6 +1,6 @@
 import { parseSetActuals } from '@/features/sessions/services/session.service';
 
-import { cleanupDatabases, closeApp, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
+import { cleanupDatabases, closeApp, listDefaultWorkouts, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
 
 describe('sessionService', () => {
   let app: TestApp;
@@ -11,7 +11,7 @@ describe('sessionService', () => {
 
   beforeEach(async () => {
     app = startApp();
-    workoutId = (await app.workouts.workoutService.listWorkouts())[0]!.id;
+    workoutId = (await listDefaultWorkouts(app))[0]!.id;
   });
   afterEach(async () => {
     await closeApp(app);

@@ -6,13 +6,14 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenContainer } from '@/components/ui/ScreenContainer';
 import { useToast } from '@/components/ui/Toast';
+import { ProgramActionsSheet } from '@/features/programs/components/ProgramActionsSheet';
+import { ProgramFormModal } from '@/features/programs/components/ProgramFormModal';
+import { ProgramList } from '@/features/programs/components/ProgramList';
+import { usePrograms } from '@/features/programs/hooks/usePrograms';
+import { ProgramServiceError, type ProgramInput } from '@/features/programs/services/program.service';
+import type { ProgramFormMode, TrainingProgram } from '@/features/programs/types/program.types';
 import { InProgressSessionBanner } from '@/features/sessions/components/InProgressSessionBanner';
 import { useInProgressSessions } from '@/features/sessions/hooks/useInProgressSessions';
-import { WorkoutActionsSheet } from '@/features/workouts/components/WorkoutActionsSheet';
-import { WorkoutFormModal } from '@/features/workouts/components/WorkoutFormModal';
-import { WorkoutList } from '@/features/workouts/components/WorkoutList';
-import { useWorkouts } from '@/features/workouts/hooks/useWorkouts';
-import type { Workout, WorkoutFormMode } from '@/features/workouts/types/workout.types';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -21,9 +22,9 @@ import { typography } from '@/theme/typography';
 type OverlayState =
   | { type: 'none' }
   | { type: 'form'; mode: 'create'; key: number }
-  | { type: 'form'; mode: 'edit'; key: number; workout: Workout }
-  | { type: 'actions'; workout: Workout }
-  | { type: 'confirm-delete'; workout: Workout };
+  | { type: 'form'; mode: 'edit'; key: number; program: TrainingProgram }
+  | { type: 'actions'; program: TrainingProgram }
+  | { type: 'confirm-delete'; program: TrainingProgram };
 
 function getGreeting(date: Date): string {
   const hour = date.getHours();
@@ -32,14 +33,20 @@ function getGreeting(date: Date): string {
   return 'Boa noite';
 }
 
+function describeProgramDeletion(workoutCount: number): string {
+  if (workoutCount === 0) return ' será excluído.';
+  if (workoutCount === 1) return ' e o seu treino (com os exercícios) serão excluídos.';
+  return ` e os seus ${workoutCount} treinos (com os exercícios) serão excluídos.`;
+}
+
 export default function HomeScreen() {
-  const { workouts, status, reload, refresh, createWorkout, renameWorkout, deleteWorkout, duplicateWorkout } =
-    useWorkouts();
+  const { programs, status, reload, refresh, createProgram, updateProgram, deleteProgram, duplicateProgram } =
+    usePrograms();
   const toast = useToast();
 
   const { sessions: inProgressSessions, refresh: refreshSessions } = useInProgressSessions();
 
-  // Ao abrir/voltar para a Home: atualiza a contagem de exercícios e detecta sessões em andamento
+  // Ao abrir/voltar para a Home: atualiza a contagem de treinos e detecta sessões em andamento
   // (inclusive após o app ter sido fechado no meio de um treino).
   useFocusEffect(
     useCallback(() => {
@@ -56,32 +63,32 @@ export default function HomeScreen() {
     if (!isSaving) setOverlay({ type: 'none' });
   };
 
-  const openForm = (mode: WorkoutFormMode, workout?: Workout) => {
+  const openForm = (mode: ProgramFormMode, program?: TrainingProgram) => {
     const key = formOpenCount + 1;
     setFormOpenCount(key);
     setOverlay(
-      mode === 'edit' && workout
-        ? { type: 'form', mode, key, workout }
+      mode === 'edit' && program
+        ? { type: 'form', mode, key, program }
         : { type: 'form', mode: 'create', key },
     );
   };
 
-  const handleSubmit = async (name: string) => {
+  const handleSubmit = async (input: ProgramInput) => {
     if (overlay.type !== 'form' || isSaving) return;
     setIsSaving(true);
     try {
       if (overlay.mode === 'edit') {
-        await renameWorkout(overlay.workout.id, name);
-        toast.show('Nome do treino atualizado');
+        await updateProgram(overlay.program.id, input);
+        toast.show('Planejamento atualizado');
       } else {
-        await createWorkout(name);
-        toast.show('Treino criado');
+        await createProgram(input);
+        toast.show('Planejamento criado');
       }
       setOverlay({ type: 'none' });
     } catch {
       // O formulário continua aberto com o texto digitado para o usuário tentar de novo.
       // Alert (e não toast): o Modal fica por cima de toasts no Android.
-      Alert.alert('Não foi possível salvar', 'Ocorreu um erro ao salvar o treino. Tente novamente.');
+      Alert.alert('Não foi possível salvar', 'Ocorreu um erro ao salvar o planejamento. Tente novamente.');
     } finally {
       setIsSaving(false);
     }
@@ -91,33 +98,40 @@ export default function HomeScreen() {
     if (overlay.type !== 'confirm-delete' || isSaving) return;
     setIsSaving(true);
     try {
-      await deleteWorkout(overlay.workout.id);
+      await deleteProgram(overlay.program.id);
       setOverlay({ type: 'none' });
-      toast.show('Treino excluído');
-    } catch {
+      toast.show('Planejamento excluído');
+    } catch (error) {
       setOverlay({ type: 'none' });
-      toast.show('Não foi possível excluir o treino. Tente novamente.', 'error');
+      if (error instanceof ProgramServiceError && error.code === 'has-session-in-progress') {
+        Alert.alert(
+          'Treino em andamento',
+          'Um treino deste planejamento está em andamento. Finalize esse treino antes de excluir o planejamento. Nada foi excluído.',
+        );
+      } else {
+        toast.show('Não foi possível excluir o planejamento. Nada foi alterado.', 'error');
+      }
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDuplicate = async (workout: Workout) => {
+  const handleDuplicate = async (program: TrainingProgram) => {
     if (isSaving) return;
     setOverlay({ type: 'none' });
     setIsSaving(true);
     try {
-      const copy = await duplicateWorkout(workout.id);
+      const copy = await duplicateProgram(program.id);
       toast.show(`“${copy.name}” criado`);
     } catch {
-      toast.show('Não foi possível duplicar o treino. Nada foi alterado.', 'error');
+      toast.show('Não foi possível duplicar o planejamento. Nada foi alterado.', 'error');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleWorkoutPress = (workout: Workout) => {
-    router.push({ pathname: '/workout/[id]', params: { id: workout.id, name: workout.name } });
+  const handleProgramPress = (program: TrainingProgram) => {
+    router.push({ pathname: '/program/[id]', params: { id: program.id, name: program.name } });
   };
 
   const header = (
@@ -145,21 +159,21 @@ export default function HomeScreen() {
       <View style={styles.sectionRow}>
         <View style={styles.sectionTitleGroup}>
           <Text style={styles.sectionTitle} accessibilityRole="header">
-            Meus treinos
+            Meus planejamentos
           </Text>
           {status === 'ready' ? (
             <Text style={styles.sectionCount}>
-              {workouts.length === 1 ? '1 treino' : `${workouts.length} treinos`}
+              {programs.length === 1 ? '1 planejamento' : `${programs.length} planejamentos`}
             </Text>
           ) : null}
         </View>
-        {status === 'ready' && workouts.length > 0 ? (
+        {status === 'ready' && programs.length > 0 ? (
           <PrimaryButton
             label="Novo"
             leadingSymbol="+"
             size="compact"
             onPress={() => openForm('create')}
-            accessibilityLabel="Adicionar treino"
+            accessibilityLabel="Adicionar planejamento"
           />
         ) : null}
       </View>
@@ -168,22 +182,23 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer>
-      <WorkoutList
-        workouts={workouts}
+      <ProgramList
+        programs={programs}
         header={header}
-        onWorkoutPress={handleWorkoutPress}
-        onWorkoutOptionsPress={(workout) => setOverlay({ type: 'actions', workout })}
-        onCreateWorkoutPress={() => openForm('create')}
+        onProgramPress={handleProgramPress}
+        onProgramOptionsPress={(program) => setOverlay({ type: 'actions', program })}
+        onCreateProgramPress={() => openForm('create')}
         status={status}
         onRetryPress={reload}
       />
 
       {overlay.type === 'form' ? (
-        <WorkoutFormModal
+        <ProgramFormModal
           key={overlay.key}
           visible
           mode={overlay.mode}
-          initialName={overlay.mode === 'edit' ? overlay.workout.name : ''}
+          initialName={overlay.mode === 'edit' ? overlay.program.name : ''}
+          initialDescription={overlay.mode === 'edit' ? (overlay.program.description ?? '') : ''}
           onSubmit={handleSubmit}
           onCancel={closeOverlay}
           submitting={isSaving}
@@ -191,12 +206,12 @@ export default function HomeScreen() {
       ) : null}
 
       {overlay.type === 'actions' ? (
-        <WorkoutActionsSheet
+        <ProgramActionsSheet
           visible
-          workout={overlay.workout}
-          onEdit={(workout) => openForm('edit', workout)}
+          program={overlay.program}
+          onEdit={(program) => openForm('edit', program)}
           onDuplicate={handleDuplicate}
-          onDelete={(workout) => setOverlay({ type: 'confirm-delete', workout })}
+          onDelete={(program) => setOverlay({ type: 'confirm-delete', program })}
           onClose={closeOverlay}
         />
       ) : null}
@@ -205,14 +220,12 @@ export default function HomeScreen() {
         <ConfirmDialog
           visible
           destructive
-          title="Excluir treino?"
+          title="Excluir planejamento?"
           message={
             <>
-              O treino <Text style={styles.highlight}>{overlay.workout.name}</Text>
-              {overlay.workout.exerciseCount > 0
-                ? ` e ${overlay.workout.exerciseCount === 1 ? 'seu exercício serão excluídos' : `seus ${overlay.workout.exerciseCount} exercícios serão excluídos`}.`
-                : ' será excluído.'}{' '}
-              Essa ação não pode ser desfeita.
+              O planejamento <Text style={styles.highlight}>{overlay.program.name}</Text>
+              {describeProgramDeletion(overlay.program.workoutCount)} O histórico dos treinos já realizados é
+              mantido. Essa ação não pode ser desfeita.
             </>
           }
           confirmLabel="Excluir"

@@ -12,6 +12,9 @@ type ExerciseServiceModule = typeof import('@/features/exercises/services/exerci
 type ExerciseRepositoryModule = typeof import('@/features/exercises/repositories/exercise.repository');
 type SessionServiceModule = typeof import('@/features/sessions/services/session.service');
 type HistoryServiceModule = typeof import('@/features/history/services/history.service');
+type ProgramServiceModule = typeof import('@/features/programs/services/program.service');
+type WorkoutRepositoryModule = typeof import('@/features/workouts/repositories/workout.repository');
+type ProgramRepositoryModule = typeof import('@/features/programs/repositories/program.repository');
 
 export interface TestApp {
   dbPath: string;
@@ -22,6 +25,9 @@ export interface TestApp {
   exerciseRepository: ExerciseRepositoryModule['exerciseRepository'];
   sessions: SessionServiceModule;
   history: HistoryServiceModule;
+  programs: ProgramServiceModule;
+  workoutRepository: WorkoutRepositoryModule['workoutRepository'];
+  programRepository: ProgramRepositoryModule['programRepository'];
 }
 
 function load(dbPath: string): TestApp {
@@ -34,6 +40,9 @@ function load(dbPath: string): TestApp {
     exerciseRepository: require('@/features/exercises/repositories/exercise.repository').exerciseRepository,
     sessions: require('@/features/sessions/services/session.service'),
     history: require('@/features/history/services/history.service'),
+    programs: require('@/features/programs/services/program.service'),
+    workoutRepository: require('@/features/workouts/repositories/workout.repository').workoutRepository,
+    programRepository: require('@/features/programs/repositories/program.repository').programRepository,
   };
 }
 
@@ -79,4 +88,16 @@ export function cleanupDatabases(): void {
 /** Data local (fuso fixo dos testes) em ISO 8601. */
 export function localIso(year: number, month: number, day: number, hour = 18, minute = 0): string {
   return new Date(year, month - 1, day, hour, minute).toISOString();
+}
+
+/** ID do planejamento padrão ("Meu planejamento", criado pela migration v6). */
+export async function defaultProgramId(app: TestApp): Promise<string> {
+  const [first] = await app.programs.programService.listPrograms();
+  if (!first) throw new Error('Nenhum planejamento encontrado.');
+  return first.id;
+}
+
+/** Treinos do planejamento padrão (onde ficam os treinos de demonstração A, B e C). */
+export async function listDefaultWorkouts(app: TestApp) {
+  return app.workouts.workoutService.listWorkouts(await defaultProgramId(app));
 }

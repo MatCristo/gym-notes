@@ -1,6 +1,6 @@
 import { parseExerciseForm } from '@/features/exercises/services/exercise.service';
 
-import { cleanupDatabases, closeApp, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
+import { cleanupDatabases, closeApp, listDefaultWorkouts, restartApp, startApp, type TestApp } from '../../../../test/helpers/app';
 
 const input = (name: string, sets = 3, reps = 10, weightKg = 20, restSeconds = 60) => ({
   name,
@@ -17,7 +17,7 @@ describe('exerciseService', () => {
 
   beforeEach(async () => {
     app = startApp();
-    const [a, b] = await app.workouts.workoutService.listWorkouts();
+    const [a, b] = await listDefaultWorkouts(app);
     workoutId = a!.id;
     otherWorkoutId = b!.id;
   });
@@ -134,6 +134,90 @@ describe('exerciseService', () => {
       await app.exercises.exerciseService.reorderExercises(workoutId, [ids[3]!, ids[2]!, ids[1]!, ids[0]!]);
       const details = await app.sessions.sessionService.getSessionDetails(sessionId);
       expect(details!.exercises.map((e) => e.exerciseNameSnapshot)).toEqual(['A', 'B', 'C', 'D']);
+    });
+  });
+
+  describe('duplicação', () => {
+    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const names = async (id = workoutId) => (await app.exercises.exerciseService.listByWorkout(id)).map((e) => e.name);
+
+    it('copia nome e prescrição com UUID novo, logo abaixo do original, renumerando a lista', async () => {
+      const { exerciseService } = app.exercises;
+      await exerciseService.createExercise(workoutId, input('A'));
+      const b = await exerciseService.createExercise(workoutId, input('B', 4, 12, 22.5, 90));
+      await exerciseService.createExercise(workoutId, input('C'));
+      await exerciseService.createExercise(otherWorkoutId, input('Outro'));
+
+      const copy = await exerciseService.duplicateExercise(b.id);
+
+      expect(copy.id).toMatch(UUID_V4);
+      expect(copy.id).not.toBe(b.id);
+      expect(copy).toMatchObject({ workoutId, name: 'B', sets: 4, reps: 12, weightKg: 22.5, restSeconds: 90, sortOrder: 2 });
+      app = await restartApp(app);
+      const list = await app.exercises.exerciseService.listByWorkout(workoutId);
+      expect(list.map((e) => [e.name, e.sortOrder])).toEqual([
+        ['A', 0],
+        ['B', 1],
+        ['B', 2],
+        ['C', 3],
+      ]);
+      expect(list[2]!.id).toBe(copy.id);
+      expect(await names(otherWorkoutId)).toEqual(['Outro']);
+    });
+
+    it('não altera o original e a cópia é independente', async () => {
+      const { exerciseService } = app.exercises;
+      const original = await exerciseService.createExercise(workoutId, input('Supino', 4, 10, 40, 60));
+      const copy = await exerciseService.duplicateExercise(original.id);
+
+      expect(await app.exerciseRepository.findById(original.id)).toEqual(original);
+      await exerciseService.updateExercise(copy.id, input('Supino inclinado', 3, 8, 30, 90));
+      await exerciseService.deleteExercise(copy.id);
+      expect(await app.exerciseRepository.findById(original.id)).toEqual(original);
+    });
+
+    it('duplica o último exercício no fim da lista e corrige buracos na ordenação', async () => {
+      const { exerciseService } = app.exercises;
+      const a = await exerciseService.createExercise(workoutId, input('A'));
+      const b = await exerciseService.createExercise(workoutId, input('B'));
+      const c = await exerciseService.createExercise(workoutId, input('C'));
+      await exerciseService.deleteExercise(b.id); // deixa um buraco: 0, 2
+
+      await exerciseService.duplicateExercise(c.id);
+      const list = await exerciseService.listByWorkout(workoutId);
+      expect(list.map((e) => [e.name, e.sortOrder])).toEqual([
+        ['A', 0],
+        ['C', 1],
+        ['C', 2],
+      ]);
+      expect(list[0]!.id).toBe(a.id);
+    });
+
+    it('não copia sessões nem histórico e não altera sessões já iniciadas', async () => {
+      const { exerciseService } = app.exercises;
+      const a = await exerciseService.createExercise(workoutId, input('A'));
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+
+      await exerciseService.duplicateExercise(a.id);
+
+      const details = (await app.sessions.sessionService.getSessionDetails(sessionId))!;
+      expect(details.exercises.map((e) => e.exerciseNameSnapshot)).toEqual(['A']);
+      const db = await app.database.getDatabase();
+      expect((await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM session_exercises'))!.n).toBe(1);
+    });
+
+    it('recusa ID inexistente e desfaz tudo se falhar no meio', async () => {
+      const { exerciseService } = app.exercises;
+      await expect(exerciseService.duplicateExercise('nao-existe')).rejects.toMatchObject({ code: 'not-found' });
+
+      const a = await exerciseService.createExercise(workoutId, input('A'));
+      await exerciseService.createExercise(workoutId, input('B'));
+      const before = await exerciseService.listByWorkout(workoutId);
+      const spy = jest.spyOn(app.exerciseRepository, 'insert').mockRejectedValue(new Error('falha simulada'));
+
+      await expect(exerciseService.duplicateExercise(a.id)).rejects.toThrow('falha simulada');
+      spy.mockRestore();
+      expect(await exerciseService.listByWorkout(workoutId)).toEqual(before);
     });
   });
 });

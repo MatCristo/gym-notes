@@ -5,6 +5,7 @@ interface ExerciseActionsSheetProps {
   visible: boolean;
   exercise: Exercise;
   onEdit: (exercise: Exercise) => void;
+  onDuplicate: (exercise: Exercise) => void;
   onViewProgress: (exercise: Exercise) => void;
   onDelete: (exercise: Exercise) => void;
   onClose: () => void;
@@ -15,6 +16,7 @@ export function ExerciseActionsSheet({
   visible,
   exercise,
   onEdit,
+  onDuplicate,
   onViewProgress,
   onDelete,
   onClose,
@@ -31,6 +33,12 @@ export function ExerciseActionsSheet({
           label: 'Editar exercício',
           onPress: () => onEdit(exercise),
           accessibilityLabel: `Editar ${exercise.name}`,
+        },
+        {
+          key: 'duplicate',
+          label: 'Duplicar exercício',
+          onPress: () => onDuplicate(exercise),
+          accessibilityLabel: `Duplicar ${exercise.name} logo abaixo do original`,
         },
         {
           key: 'progress',
