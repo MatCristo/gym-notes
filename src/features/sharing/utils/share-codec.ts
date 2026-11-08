@@ -1,10 +1,12 @@
+import { normalizeExerciseObservation } from '@/features/exercises/services/exercise.service';
 import type { ProgramStructure } from '@/features/programs/types/program.types';
 import {
   SHARE_CODE_PREFIX,
-  SHARE_FORMAT_VERSION,
+  SHARE_FORMAT_BASE_VERSION,
+  SHARE_FORMAT_LATEST_VERSION,
   SHARE_LIMITS,
   type SharedExerciseTuple,
-  type SharedProgramPayloadV1,
+  type SharedProgramPayload,
   type ShareResult,
 } from '@/features/sharing/types/sharing.types';
 import { validateSharedPayload } from '@/features/sharing/utils/share-validation';
@@ -243,8 +245,8 @@ export function decodeEnvelope(raw: string): ShareResult<unknown> {
 /** Decodifica o código que começa no cabeçalho encontrado. */
 function decodeAt(raw: string, header: RegExpExecArray): ShareResult<unknown> {
   const version = Number(header[1]);
-  if (version > SHARE_FORMAT_VERSION) return { ok: false, error: 'unsupported-version' };
-  if (version !== SHARE_FORMAT_VERSION) return { ok: false, error: 'malformed' };
+  if (version > SHARE_FORMAT_LATEST_VERSION) return { ok: false, error: 'unsupported-version' };
+  if (version < SHARE_FORMAT_BASE_VERSION) return { ok: false, error: 'malformed' };
 
   // Payload: caracteres do alfabeto Base64 (espaços/quebras de linha são ignorados) até o ponto.
   let index = header.index + header[0].length;
@@ -273,44 +275,55 @@ function decodeAt(raw: string, header: RegExpExecArray): ShareResult<unknown> {
   // Limita o aninhamento ANTES do JSON.parse (evita estouro de pilha com entradas maliciosas).
   if (jsonDepth(json) > SHARE_LIMITS.maxJsonDepth) return { ok: false, error: 'malformed' };
 
+  let value: unknown;
   try {
-    return { ok: true, value: JSON.parse(json) as unknown };
+    value = JSON.parse(json) as unknown;
   } catch {
     return { ok: false, error: 'malformed' };
   }
+  // O cabeçalho (fora do CRC) precisa indicar a mesma versão do conteúdo (dentro do CRC).
+  if (typeof value === 'object' && value !== null && 'v' in value && value.v !== version) {
+    const payloadVersion = value.v;
+    if (typeof payloadVersion === 'number' && payloadVersion > SHARE_FORMAT_LATEST_VERSION) {
+      return { ok: false, error: 'unsupported-version' };
+    }
+    return { ok: false, error: 'malformed' };
+  }
+  return { ok: true, value };
 }
 
-/** Monta o código a partir de um payload: `GN1:<base64>.<crc32>`. */
-export function encodeEnvelope(payload: SharedProgramPayloadV1): string {
+/** Monta o código a partir de um payload: `GN<v>:<base64>.<crc32>` (o cabeçalho usa a versão do payload). */
+export function encodeEnvelope(payload: SharedProgramPayload): string {
   const bytes = utf8Encode(JSON.stringify(payload));
-  return `${SHARE_CODE_PREFIX}${SHARE_FORMAT_VERSION}:${base64Encode(bytes)}.${crc32Hex(bytes)}`;
+  return `${SHARE_CODE_PREFIX}${payload.v}:${base64Encode(bytes)}.${crc32Hex(bytes)}`;
 }
 
 // ---------------------------------------------------------------- Estrutura ↔ código
 
 /**
  * Mapeamento EXPLÍCITO da estrutura para o payload: copia somente os campos permitidos
- * (nomes, descrição, ordem pela posição no array, séries, repetições, carga e descanso).
+ * (nomes, descrição, ordem pela posição no array, séries, repetições, carga, descanso e observação).
  * Não usa spread: nenhum campo extra que exista no objeto de origem chega ao código.
  */
-export function toSharedPayload(structure: ProgramStructure): SharedProgramPayloadV1 {
-  const program: SharedProgramPayloadV1['p'] = {
+export function toSharedPayload(structure: ProgramStructure): SharedProgramPayload {
+  // A menor versão que representa o conteúdo: GN2 só se algum exercício tiver observação.
+  const hasObservation = structure.workouts.some((workout) =>
+    workout.exercises.some((exercise) => normalizeExerciseObservation(exercise.observation) !== null),
+  );
+  const program: SharedProgramPayload['p'] = {
     n: structure.name,
     w: structure.workouts.map((workout) => ({
       n: workout.name,
-      e: workout.exercises.map(
-        (exercise): SharedExerciseTuple => [
-          exercise.name,
-          exercise.sets,
-          exercise.reps,
-          exercise.weightKg,
-          exercise.restSeconds,
-        ],
-      ),
+      e: workout.exercises.map((exercise): SharedExerciseTuple => {
+        const observation = normalizeExerciseObservation(exercise.observation);
+        return observation === null
+          ? [exercise.name, exercise.sets, exercise.reps, exercise.weightKg, exercise.restSeconds]
+          : [exercise.name, exercise.sets, exercise.reps, exercise.weightKg, exercise.restSeconds, observation];
+      }),
     })),
   };
   if (structure.description !== null) program.d = structure.description;
-  return { v: SHARE_FORMAT_VERSION, p: program };
+  return { v: hasObservation ? SHARE_FORMAT_LATEST_VERSION : SHARE_FORMAT_BASE_VERSION, p: program };
 }
 
 /**

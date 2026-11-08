@@ -20,6 +20,7 @@ interface SessionExerciseRow {
   session_id: string;
   exercise_id: string | null;
   exercise_name_snapshot: string;
+  observation_snapshot: string | null;
   planned_rest_seconds: number;
   sort_order: number;
 }
@@ -82,6 +83,7 @@ export interface InsertSessionExerciseInput {
   sessionId: string;
   exerciseId: string;
   exerciseNameSnapshot: string;
+  observationSnapshot: string | null;
   plannedRestSeconds: number;
   sortOrder: number;
 }
@@ -163,13 +165,14 @@ export const sessionRepository = {
     const db = await getDatabase();
     await db.runAsync(
       `INSERT INTO session_exercises
-         (id, session_id, exercise_id, exercise_name_snapshot, planned_rest_seconds, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (id, session_id, exercise_id, exercise_name_snapshot, observation_snapshot, planned_rest_seconds, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         input.id,
         input.sessionId,
         input.exerciseId,
         input.exerciseNameSnapshot,
+        input.observationSnapshot,
         input.plannedRestSeconds,
         input.sortOrder,
       ],
@@ -180,7 +183,7 @@ export const sessionRepository = {
   async findSessionExercisesWithSets(sessionId: string): Promise<SessionExercise[]> {
     const db = await getDatabase();
     const exerciseRows = await db.getAllAsync<SessionExerciseRow>(
-      `SELECT id, session_id, exercise_id, exercise_name_snapshot, planned_rest_seconds, sort_order
+      `SELECT id, session_id, exercise_id, exercise_name_snapshot, observation_snapshot, planned_rest_seconds, sort_order
          FROM session_exercises WHERE session_id = ? ORDER BY sort_order ASC`,
       [sessionId],
     );
@@ -205,6 +208,7 @@ export const sessionRepository = {
       sessionId: row.session_id,
       exerciseId: row.exercise_id,
       exerciseNameSnapshot: row.exercise_name_snapshot,
+      observationSnapshot: row.observation_snapshot,
       plannedRestSeconds: row.planned_rest_seconds,
       sortOrder: row.sort_order,
       sets: setsByExercise.get(row.id) ?? [],

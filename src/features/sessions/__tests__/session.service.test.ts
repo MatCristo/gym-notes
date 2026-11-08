@@ -170,4 +170,108 @@ describe('sessionService', () => {
     expect(await app.sessions.sessionService.getSessionDetails('nao-existe')).toBeNull();
     await expect(app.sessions.sessionService.finishSession('nao-existe')).rejects.toMatchObject({ code: 'session-not-found' });
   });
+
+  describe('observação congelada na sessão (snapshot)', () => {
+    const OBS = 'Manter a coluna apoiada.';
+
+    async function planWithObservation() {
+      const { exerciseService } = app.exercises;
+      const supino = await exerciseService.createExercise(workoutId, {
+        name: 'Supino reto',
+        sets: 2,
+        reps: 12,
+        weightKg: 40,
+        restSeconds: 90,
+        observation: OBS,
+      });
+      const crucifixo = await exerciseService.createExercise(workoutId, {
+        name: 'Crucifixo',
+        sets: 1,
+        reps: 12,
+        weightKg: 15,
+        restSeconds: 0,
+      });
+      return { supino, crucifixo };
+    }
+
+    const snapshots = async (sessionId: string) =>
+      (await app.sessions.sessionService.getSessionDetails(sessionId))!.exercises.map((e) => [
+        e.exerciseNameSnapshot,
+        e.observationSnapshot,
+      ]);
+
+    it('ao iniciar, copia a observação atual de cada exercício (null quando não há)', async () => {
+      await planWithObservation();
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+      expect(await snapshots(sessionId)).toEqual([
+        ['Supino reto', OBS],
+        ['Crucifixo', null],
+      ]);
+    });
+
+    it('editar a observação original depois não muda a sessão em andamento nem a concluída', async () => {
+      const { supino } = await planWithObservation();
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+
+      await app.exercises.exerciseService.updateExercise(supino.id, {
+        name: 'Supino reto',
+        sets: 2,
+        reps: 12,
+        weightKg: 40,
+        restSeconds: 90,
+        observation: 'Outra orientação',
+      });
+      expect((await snapshots(sessionId))[0]).toEqual(['Supino reto', OBS]);
+
+      await app.sessions.sessionService.finishSession(sessionId);
+      expect((await snapshots(sessionId))[0]).toEqual(['Supino reto', OBS]);
+      // A próxima sessão usa a observação nova.
+      const next = await app.sessions.sessionService.startSession(workoutId);
+      expect((await snapshots(next.sessionId))[0]).toEqual(['Supino reto', 'Outra orientação']);
+    });
+
+    it('remover a observação original (ou excluir o exercício) não muda a sessão', async () => {
+      const { supino } = await planWithObservation();
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+
+      await app.exercises.exerciseService.updateExercise(supino.id, {
+        name: 'Supino reto',
+        sets: 2,
+        reps: 12,
+        weightKg: 40,
+        restSeconds: 90,
+        observation: '',
+      });
+      expect((await snapshots(sessionId))[0]).toEqual(['Supino reto', OBS]);
+
+      await app.exercises.exerciseService.deleteExercise(supino.id);
+      const details = (await app.sessions.sessionService.getSessionDetails(sessionId))!;
+      expect(details.exercises[0]).toMatchObject({ exerciseId: null, observationSnapshot: OBS });
+    });
+
+    it('a recuperação da sessão em andamento após reiniciar o app preserva a observação', async () => {
+      await planWithObservation();
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+      app = await restartApp(app);
+      expect(await app.sessions.sessionService.startSession(workoutId)).toEqual({ sessionId, resumed: true });
+      expect(await snapshots(sessionId)).toEqual([
+        ['Supino reto', OBS],
+        ['Crucifixo', null],
+      ]);
+    });
+
+    it('séries, resumo e histórico continuam iguais (a observação não entra em estatísticas)', async () => {
+      await planWithObservation();
+      const { sessionService } = app.sessions;
+      const { sessionId } = await sessionService.startSession(workoutId);
+      const [firstSet] = (await sessionService.getSessionDetails(sessionId))!.exercises[0]!.sets;
+      await sessionService.completeSet(firstSet!.id, { actualReps: 12, actualWeightKg: 42.5 });
+      const details = await sessionService.finishSession(sessionId);
+
+      expect(details.exercises.map((e) => e.sets.length)).toEqual([2, 1]);
+      const [history] = await app.history.historyService.listCompletedSessions();
+      expect(history).toMatchObject({ id: sessionId, completedSets: 1, plannedSets: 3 });
+      expect(JSON.stringify(history)).not.toContain(OBS);
+    });
+  });
 });

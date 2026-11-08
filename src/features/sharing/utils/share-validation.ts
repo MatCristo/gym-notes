@@ -1,4 +1,4 @@
-import { isValidExerciseInput } from '@/features/exercises/services/exercise.service';
+import { isValidExerciseInput, normalizeExerciseObservation } from '@/features/exercises/services/exercise.service';
 import type { ExerciseInput } from '@/features/exercises/types/exercise.types';
 import {
   normalizeProgramDescription,
@@ -7,7 +7,12 @@ import {
   validateProgramName,
 } from '@/features/programs/services/program.service';
 import type { ProgramStructure, WorkoutStructure } from '@/features/programs/types/program.types';
-import { SHARE_FORMAT_VERSION, SHARE_LIMITS, type ShareResult } from '@/features/sharing/types/sharing.types';
+import {
+  SHARE_FORMAT_LATEST_VERSION,
+  SHARE_LIMITS,
+  type ShareFormatVersion,
+  type ShareResult,
+} from '@/features/sharing/types/sharing.types';
 import { normalizeWorkoutName, validateWorkoutName } from '@/features/workouts/services/workout.service';
 
 /** Erro interno da validação; vira um `ShareResult` com o mesmo código na saída. */
@@ -42,38 +47,46 @@ function requireNumber(value: unknown): number {
   return value;
 }
 
-function parseExercise(raw: unknown): ExerciseInput {
+function parseExercise(raw: unknown, version: ShareFormatVersion): ExerciseInput {
   const tuple = requireArray(raw);
-  if (tuple.length !== 5) throw new PayloadError('malformed');
-  // Mapeamento explícito da tupla [nome, séries, repetições, carga, descanso].
+  // v1: exatamente 5 posições. v2: 5, ou 6 com a observação.
+  const validLength = tuple.length === 5 || (version >= 2 && tuple.length === 6);
+  if (!validLength) throw new PayloadError('malformed');
+  const rawObservation = tuple.length === 6 ? requireString(tuple[5]) : null;
+  // Mapeamento explícito da tupla [nome, séries, repetições, carga, descanso, observação?].
   const input: ExerciseInput = {
     name: requireString(tuple[0]),
     sets: requireNumber(tuple[1]),
     reps: requireNumber(tuple[2]),
     weightKg: requireNumber(tuple[3]),
     restSeconds: requireNumber(tuple[4]),
+    observation: rawObservation,
   };
-  // Mesma regra usada pelo exerciseService (limites de EXERCISE_LIMITS).
+  // Mesma regra usada pelo exerciseService (limites de EXERCISE_LIMITS, inclusive da observação).
   if (!isValidExerciseInput(input)) throw new PayloadError('invalid-content');
-  return {
+  const exercise: ExerciseInput = {
     name: input.name.trim(),
     sets: input.sets,
     reps: input.reps,
     weightKg: input.weightKg,
     restSeconds: input.restSeconds,
   };
+  // A observação só aparece na estrutura quando existe (ausente = sem observação).
+  const observation = normalizeExerciseObservation(rawObservation);
+  if (observation !== null) exercise.observation = observation;
+  return exercise;
 }
 
-function parseWorkout(raw: unknown): WorkoutStructure {
+function parseWorkout(raw: unknown, version: ShareFormatVersion): WorkoutStructure {
   const workout = requireObject(raw);
   const name = requireString(workout.n);
   const exercises = requireArray(workout.e);
   if (validateWorkoutName(name) !== null) throw new PayloadError('invalid-content');
   if (exercises.length > SHARE_LIMITS.maxExercisesPerWorkout) throw new PayloadError('invalid-content');
-  return { name: normalizeWorkoutName(name), exercises: exercises.map(parseExercise) };
+  return { name: normalizeWorkoutName(name), exercises: exercises.map((exercise) => parseExercise(exercise, version)) };
 }
 
-function parseProgram(raw: unknown): ProgramStructure {
+function parseProgram(raw: unknown, version: ShareFormatVersion): ProgramStructure {
   const program = requireObject(raw);
   const name = requireString(program.n);
   const rawDescription = program.d;
@@ -92,7 +105,7 @@ function parseProgram(raw: unknown): ProgramStructure {
   return {
     name: normalizeProgramName(name),
     description: normalizeProgramDescription(description),
-    workouts: workouts.map(parseWorkout),
+    workouts: workouts.map((workout) => parseWorkout(workout, version)),
   };
 }
 
@@ -105,11 +118,11 @@ export function validateSharedPayload(data: unknown): ShareResult<ProgramStructu
   try {
     const root = requireObject(data);
     const version = root.v;
-    if (typeof version === 'number' && Number.isInteger(version) && version > SHARE_FORMAT_VERSION) {
+    if (typeof version === 'number' && Number.isInteger(version) && version > SHARE_FORMAT_LATEST_VERSION) {
       throw new PayloadError('unsupported-version');
     }
-    if (version !== SHARE_FORMAT_VERSION) throw new PayloadError('malformed');
-    return { ok: true, value: parseProgram(root.p) };
+    if (version !== 1 && version !== 2) throw new PayloadError('malformed');
+    return { ok: true, value: parseProgram(root.p, version) };
   } catch (error) {
     if (error instanceof PayloadError) return { ok: false, error: error.code };
     throw error;

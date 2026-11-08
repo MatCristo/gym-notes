@@ -37,6 +37,7 @@ export const EMPTY_EXERCISE_FORM: ExerciseFormValues = {
   reps: '',
   weightKg: '',
   restSeconds: '60',
+  observation: '',
 };
 
 const COPY: Record<ExerciseFormMode, { title: string; submit: string }> = {
@@ -50,6 +51,7 @@ const FIELD_LABELS: Record<ExerciseField, string> = {
   reps: 'repetições',
   weightKg: 'carga',
   restSeconds: 'descanso',
+  observation: 'observação',
 };
 
 const FIELD_MAX: Partial<Record<ExerciseField, string>> = {
@@ -58,6 +60,7 @@ const FIELD_MAX: Partial<Record<ExerciseField, string>> = {
   reps: String(EXERCISE_LIMITS.repsMax),
   weightKg: `${EXERCISE_LIMITS.weightMaxKg} kg`,
   restSeconds: `${EXERCISE_LIMITS.restMaxSeconds} s`,
+  observation: `${EXERCISE_LIMITS.observationMaxLength} caracteres`,
 };
 
 function getErrorMessage(field: ExerciseField, error: ExerciseFieldError | undefined): string | null {
@@ -178,6 +181,18 @@ export function ExerciseFormSheet({
             style={styles.rowItem}
           />
         </View>
+
+        <TextField
+          label="Observação (opcional)"
+          value={values.observation}
+          onChangeText={setField('observation')}
+          placeholder="Ex.: Manter a coluna apoiada."
+          multiline
+          maxLength={EXERCISE_LIMITS.observationMaxLength}
+          autoCapitalize="sentences"
+          counter={`${values.observation.length}/${EXERCISE_LIMITS.observationMaxLength}`}
+          error={getErrorMessage('observation', errors.observation)}
+        />
       </ScrollView>
 
       <View style={styles.actions}>

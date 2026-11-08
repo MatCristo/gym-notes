@@ -27,11 +27,24 @@ describe('exerciseService', () => {
   afterAll(cleanupDatabases);
 
   describe('parseExerciseForm', () => {
-    const form = (values: Partial<Record<'name' | 'sets' | 'reps' | 'weightKg' | 'restSeconds', string>>) =>
-      parseExerciseForm({ name: 'Remada', sets: '3', reps: '10', weightKg: '', restSeconds: '', ...values });
+    const form = (
+      values: Partial<Record<'name' | 'sets' | 'reps' | 'weightKg' | 'restSeconds' | 'observation', string>>,
+    ) =>
+      parseExerciseForm({
+        name: 'Remada',
+        sets: '3',
+        reps: '10',
+        weightKg: '',
+        restSeconds: '',
+        observation: '',
+        ...values,
+      });
 
     it('converte valores válidos (vírgula decimal; carga e descanso vazios = 0)', () => {
-      expect(form({})).toEqual({ ok: true, input: { name: 'Remada', sets: 3, reps: 10, weightKg: 0, restSeconds: 0 } });
+      expect(form({})).toEqual({
+        ok: true,
+        input: { name: 'Remada', sets: 3, reps: 10, weightKg: 0, restSeconds: 0, observation: null },
+      });
       expect(form({ weightKg: '17,5', restSeconds: '90' })).toMatchObject({ ok: true, input: { weightKg: 17.5, restSeconds: 90 } });
       expect(form({ weightKg: '0' })).toMatchObject({ ok: true, input: { weightKg: 0 } });
     });
@@ -218,6 +231,95 @@ describe('exerciseService', () => {
       await expect(exerciseService.duplicateExercise(a.id)).rejects.toThrow('falha simulada');
       spy.mockRestore();
       expect(await exerciseService.listByWorkout(workoutId)).toEqual(before);
+    });
+  });
+
+  describe('observação', () => {
+    const OBS = 'Manter a coluna apoiada.';
+    const withObs = (name: string, observation: string | null | undefined) => ({ ...input(name), observation });
+
+    it('cria com observação (normalizada) e sem observação (null)', async () => {
+      const { exerciseService } = app.exercises;
+      const a = await exerciseService.createExercise(workoutId, withObs('Supino', `  ${OBS}  `));
+      const b = await exerciseService.createExercise(workoutId, input('Remada'));
+      const c = await exerciseService.createExercise(workoutId, withObs('Crucifixo', '   '));
+      expect([a.observation, b.observation, c.observation]).toEqual([OBS, null, null]);
+    });
+
+    it('edita, remove e persiste a observação após reiniciar o app', async () => {
+      const { exerciseService } = app.exercises;
+      const created = await exerciseService.createExercise(workoutId, withObs('Supino', OBS));
+
+      const edited = await exerciseService.updateExercise(created.id, withObs('Supino', 'Executar o movimento lentamente.'));
+      expect(edited.observation).toBe('Executar o movimento lentamente.');
+      app = await restartApp(app);
+      expect((await app.exercises.exerciseService.listByWorkout(workoutId))[0]!.observation).toBe(
+        'Executar o movimento lentamente.',
+      );
+
+      await app.exercises.exerciseService.updateExercise(created.id, withObs('Supino', ''));
+      app = await restartApp(app);
+      expect((await app.exercises.exerciseService.listByWorkout(workoutId))[0]!.observation).toBeNull();
+    });
+
+    it('aceita até 200 caracteres e recusa acima disso sem gravar', async () => {
+      const { exerciseService } = app.exercises;
+      const ok = await exerciseService.createExercise(workoutId, withObs('A', 'x'.repeat(200)));
+      expect(ok.observation).toHaveLength(200);
+      await expect(exerciseService.createExercise(workoutId, withObs('B', 'x'.repeat(201)))).rejects.toMatchObject({
+        code: 'invalid-input',
+      });
+      await expect(exerciseService.updateExercise(ok.id, withObs('A', 'y'.repeat(201)))).rejects.toMatchObject({
+        code: 'invalid-input',
+      });
+      expect((await exerciseService.listByWorkout(workoutId)).map((e) => e.observation)).toEqual(['x'.repeat(200)]);
+    });
+
+    it('formulário: campo opcional, normalizado, com limite; a edição carrega a observação salva', () => {
+      const base = { name: 'Remada', sets: '3', reps: '10', weightKg: '', restSeconds: '' };
+      expect(parseExerciseForm({ ...base, observation: '' })).toMatchObject({ ok: true, input: { observation: null } });
+      expect(parseExerciseForm({ ...base, observation: '  \n ' })).toMatchObject({ ok: true, input: { observation: null } });
+      expect(parseExerciseForm({ ...base, observation: ` ${OBS}\n` })).toMatchObject({ ok: true, input: { observation: OBS } });
+      expect(parseExerciseForm({ ...base, observation: 'x'.repeat(201) })).toEqual({
+        ok: false,
+        errors: { observation: 'too-long' },
+      });
+
+      const { exerciseToFormValues } = app.exercises;
+      const saved = { id: '1', workoutId, ...input('Remada'), observation: OBS, sortOrder: 0, createdAt: '', updatedAt: '' };
+      expect(exerciseToFormValues(saved).observation).toBe(OBS);
+      expect(exerciseToFormValues({ ...saved, observation: null }).observation).toBe('');
+    });
+
+    it('a duplicação de exercício, treino e planejamento preserva as observações', async () => {
+      const { exerciseService } = app.exercises;
+      const supino = await exerciseService.createExercise(workoutId, withObs('Supino', OBS));
+      await exerciseService.createExercise(workoutId, input('Remada'));
+
+      const copy = await exerciseService.duplicateExercise(supino.id);
+      expect(copy.observation).toBe(OBS);
+
+      const workoutCopy = await app.workouts.workoutService.duplicateWorkout(workoutId);
+      expect((await exerciseService.listByWorkout(workoutCopy.id)).map((e) => e.observation)).toEqual([OBS, OBS, null]);
+
+      const [program] = await app.programs.programService.listPrograms();
+      const programCopy = await app.programs.programService.duplicateProgram(program!.id);
+      const [copiedA] = await app.workouts.workoutService.listWorkouts(programCopy.id);
+      expect((await exerciseService.listByWorkout(copiedA!.id)).map((e) => e.observation)).toEqual([OBS, OBS, null]);
+    });
+
+    it('a observação não é copiada para sessões e editá-la não altera o histórico', async () => {
+      const { exerciseService } = app.exercises;
+      const supino = await exerciseService.createExercise(workoutId, withObs('Supino', OBS));
+      const { sessionId } = await app.sessions.sessionService.startSession(workoutId);
+      const before = await app.sessions.sessionService.getSessionDetails(sessionId);
+
+      await exerciseService.updateExercise(supino.id, withObs('Supino', 'Outra observação'));
+
+      expect(await app.sessions.sessionService.getSessionDetails(sessionId)).toEqual(before);
+      const db = await app.database.getDatabase();
+      const sessionColumns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(session_exercises)');
+      expect(sessionColumns.map((c) => c.name)).not.toContain('observation');
     });
   });
 });

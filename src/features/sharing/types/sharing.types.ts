@@ -1,18 +1,32 @@
 /**
- * Formato do código de compartilhamento de planejamentos (versão 1):
+ * Formato do código de compartilhamento de planejamentos:
  *
- *   GN1:<PAYLOAD_BASE64>.<CRC32>
+ *   GN<versão>:<PAYLOAD_BASE64>.<CRC32>
  *
  * - `PAYLOAD_BASE64`: JSON compacto em UTF-8, codificado em Base64 padrão (A–Z a–z 0–9 + /), sem padding.
  *   O alfabeto não contém `_ * ~` nem crase, que o WhatsApp interpreta como formatação.
  * - `CRC32`: 8 dígitos hexadecimais (minúsculos) do CRC-32 dos bytes UTF-8 do JSON.
+ *
+ * Versões:
+ * - v1 (`GN1`): exercício = [nome, séries, repetições, carga, descanso] (exatamente 5 posições).
+ * - v2 (`GN2`): igual à v1, com a 6ª posição OPCIONAL `observação`.
+ *
+ * O app gera a MENOR versão capaz de representar o conteúdo: sem nenhuma observação, gera GN1
+ * (idêntico ao formato anterior e legível por versões antigas do app); com observação, gera GN2
+ * (versões antigas recusam com "atualize o app", em vez de importar sem a observação).
+ * O app lê todas as versões até `SHARE_FORMAT_LATEST_VERSION`.
  *
  * O código NÃO é criptografado: qualquer pessoa pode decodificá-lo. Por isso ele contém
  * somente a estrutura e a prescrição do planejamento — nunca IDs, datas ou dados de execução.
  */
 
 export const SHARE_CODE_PREFIX = 'GN';
-export const SHARE_FORMAT_VERSION = 1;
+/** Versão mais antiga do formato (e a gerada quando não há observações). */
+export const SHARE_FORMAT_BASE_VERSION = 1;
+/** Versão mais nova que este app sabe ler e gerar. */
+export const SHARE_FORMAT_LATEST_VERSION = 2;
+
+export type ShareFormatVersion = 1 | 2;
 
 export const SHARE_LIMITS = {
   /** Tamanho máximo do texto colado (100 KB), verificado ANTES de qualquer decodificação. */
@@ -24,26 +38,31 @@ export const SHARE_LIMITS = {
   maxJsonDepth: 8,
 } as const;
 
-/** Tupla de exercício no payload: [nome, séries, repetições, cargaPlanejadaKg, descansoSegundos]. */
-export type SharedExerciseTuple = [name: string, sets: number, reps: number, weightKg: number, restSeconds: number];
+/**
+ * Tupla de exercício no payload: [nome, séries, repetições, cargaPlanejadaKg, descansoSegundos]
+ * e, somente na v2 e quando houver, [..., observação].
+ */
+export type SharedExerciseTuple =
+  | [name: string, sets: number, reps: number, weightKg: number, restSeconds: number]
+  | [name: string, sets: number, reps: number, weightKg: number, restSeconds: number, observation: string];
 
-export interface SharedWorkoutV1 {
+export interface SharedWorkout {
   /** Nome do treino. */
   n: string;
   /** Exercícios, na ordem. */
   e: SharedExerciseTuple[];
 }
 
-/** Payload (JSON) da versão 1. A ordem dos arrays é a ordem dos itens. */
-export interface SharedProgramPayloadV1 {
-  v: 1;
+/** Payload (JSON). A ordem dos arrays é a ordem dos itens. */
+export interface SharedProgramPayload {
+  v: ShareFormatVersion;
   p: {
     /** Nome do planejamento. */
     n: string;
     /** Descrição (omitida quando não houver). */
     d?: string;
     /** Treinos, na ordem. */
-    w: SharedWorkoutV1[];
+    w: SharedWorkout[];
   };
 }
 

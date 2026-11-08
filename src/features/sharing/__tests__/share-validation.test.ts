@@ -92,7 +92,7 @@ describe('validateSharedPayload', () => {
 
   describe('versão', () => {
     it('versão futura → unsupported-version; ausente, inválida ou zero → malformed', () => {
-      expect(errorOf(payload({}, { v: 2 }))).toBe('unsupported-version');
+      expect(errorOf(payload({}, { v: 3 }))).toBe('unsupported-version');
       expect(errorOf(payload({}, { v: 99 }))).toBe('unsupported-version');
       expect(errorOf(payload({}, { v: undefined }))).toBe('malformed');
       expect(errorOf(payload({}, { v: '1' }))).toBe('malformed');

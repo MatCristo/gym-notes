@@ -86,6 +86,7 @@ export async function copyWorkoutStructure(source: Workout, options: CopyWorkout
       reps: exercise.reps,
       weightKg: exercise.weightKg,
       restSeconds: exercise.restSeconds,
+      observation: exercise.observation,
       sortOrder: exercise.sortOrder,
       createdAt: options.createdAt,
     });

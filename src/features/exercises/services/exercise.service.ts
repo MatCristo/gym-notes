@@ -26,7 +26,7 @@ export type ParseExerciseFormResult =
   | { ok: true; input: ExerciseInput }
   | { ok: false; errors: ExerciseFormErrors };
 
-const NUMBER_RULES: Record<Exclude<ExerciseField, 'name'>, NumberInputRule> = {
+const NUMBER_RULES: Record<Exclude<ExerciseField, 'name' | 'observation'>, NumberInputRule> = {
   sets: { kind: 'integer', min: 1, max: EXERCISE_LIMITS.setsMax, required: true },
   reps: { kind: 'integer', min: 1, max: EXERCISE_LIMITS.repsMax, required: true },
   // Carga e descanso são opcionais no formulário: vazio = 0.
@@ -41,6 +41,11 @@ export function parseExerciseForm(values: ExerciseFormValues): ParseExerciseForm
   const name = values.name.trim();
   if (name.length === 0) errors.name = 'required';
   else if (name.length > EXERCISE_LIMITS.nameMaxLength) errors.name = 'too-long';
+
+  const observation = normalizeExerciseObservation(values.observation);
+  if (observation !== null && observation.length > EXERCISE_LIMITS.observationMaxLength) {
+    errors.observation = 'too-long';
+  }
 
   const numbers: Partial<Record<keyof typeof NUMBER_RULES, number>> = {};
   for (const field of Object.keys(NUMBER_RULES) as (keyof typeof NUMBER_RULES)[]) {
@@ -58,6 +63,7 @@ export function parseExerciseForm(values: ExerciseFormValues): ParseExerciseForm
       reps: numbers.reps ?? 0,
       weightKg: numbers.weightKg ?? 0,
       restSeconds: numbers.restSeconds ?? 0,
+      observation,
     },
   };
 }
@@ -70,6 +76,7 @@ export function exerciseToFormValues(exercise: Exercise): ExerciseFormValues {
     reps: String(exercise.reps),
     weightKg: exercise.weightKg === 0 ? '' : formatNumberForInput(exercise.weightKg),
     restSeconds: exercise.restSeconds === 0 ? '' : String(exercise.restSeconds),
+    observation: exercise.observation ?? '',
   };
 }
 
@@ -83,6 +90,12 @@ export class ExerciseServiceError extends Error {
     super(message);
     this.name = 'ExerciseServiceError';
   }
+}
+
+/** Observação opcional: espaços nas pontas são removidos e texto vazio (ou ausente) vira `null`. */
+export function normalizeExerciseObservation(raw: string | null | undefined): string | null {
+  const observation = (raw ?? '').trim();
+  return observation.length === 0 ? null : observation;
 }
 
 /**
@@ -105,7 +118,9 @@ export function isValidExerciseInput(input: ExerciseInput): boolean {
     input.weightKg <= EXERCISE_LIMITS.weightMaxKg &&
     Number.isInteger(input.restSeconds) &&
     input.restSeconds >= 0 &&
-    input.restSeconds <= EXERCISE_LIMITS.restMaxSeconds
+    input.restSeconds <= EXERCISE_LIMITS.restMaxSeconds &&
+    (input.observation === undefined || input.observation === null || typeof input.observation === 'string') &&
+    (normalizeExerciseObservation(input.observation)?.length ?? 0) <= EXERCISE_LIMITS.observationMaxLength
   );
 }
 
@@ -114,7 +129,7 @@ function assertValidInput(input: ExerciseInput): ExerciseInput {
   if (!isValidExerciseInput(input)) {
     throw new ExerciseServiceError('invalid-input', 'Dados do exercício inválidos.');
   }
-  return { ...input, name: input.name.trim() };
+  return { ...input, name: input.name.trim(), observation: normalizeExerciseObservation(input.observation) };
 }
 
 /** Regras de negócio dos exercícios planejados. Toda leitura/escrita passa pelo repository. */
@@ -167,7 +182,7 @@ export const exerciseService = {
 
   /**
    * Duplica o exercício no mesmo treino, logo abaixo do original, em uma única transação.
-   * Copia nome e prescrição (séries, repetições, carga e descanso) com novo UUID; a lista do
+   * Copia nome, prescrição (séries, repetições, carga e descanso) e observação com novo UUID; a lista do
    * treino é renumerada (0..n-1). O original e as sessões/histórico não são alterados.
    */
   async duplicateExercise(id: string): Promise<Exercise> {
@@ -195,6 +210,7 @@ export const exerciseService = {
         reps: original.reps,
         weightKg: original.weightKg,
         restSeconds: original.restSeconds,
+        observation: original.observation,
         sortOrder: copyIndex,
         createdAt: new Date().toISOString(),
       });

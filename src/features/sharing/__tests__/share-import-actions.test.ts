@@ -56,7 +56,7 @@ describe('importação: integração com a interface (área de transferência, p
   it.each([
     ['empty', ''],
     ['not-found', 'bom dia'],
-    ['unsupported-version', CODE.replace('GN1:', 'GN2:')],
+    ['unsupported-version', CODE.replace('GN1:', 'GN3:')],
     ['corrupted', CODE.slice(0, -5)],
     ['too-large', `GN1:${'A'.repeat(200 * 1024)}`],
   ] as const)('prévia e importação de código "%s" → mensagem do serviço, sem gravar nada', async (errorCode, raw) => {

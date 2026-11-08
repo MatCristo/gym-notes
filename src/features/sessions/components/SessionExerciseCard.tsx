@@ -31,6 +31,11 @@ function SessionExerciseCardComponent({
         <Text style={styles.name} accessibilityRole="header">
           {exercise.exerciseNameSnapshot}
         </Text>
+        {exercise.observationSnapshot ? (
+          <Text style={styles.observation} testID="session-exercise-observation">
+            {exercise.observationSnapshot}
+          </Text>
+        ) : null}
         <Text style={styles.meta}>
           {completed}/{exercise.sets.length} séries{rest ? ` · Descanso ${rest}` : ''}
         </Text>
@@ -79,6 +84,11 @@ const styles = StyleSheet.create({
   name: {
     ...typography.subtitle,
     color: colors.textPrimary,
+  },
+  /** Observação congelada no início da sessão: secundária e discreta, abaixo do nome. */
+  observation: {
+    ...typography.caption,
+    color: colors.textSecondary,
   },
   meta: {
     ...typography.caption,

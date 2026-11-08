@@ -17,6 +17,10 @@ interface TextFieldProps {
   maxLength?: number;
   autoFocus?: boolean;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  /** Campo de várias linhas (ex.: observações). */
+  multiline?: boolean;
+  /** Texto curto à direita, abaixo do campo (ex.: contador "12/200"). */
+  counter?: string;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -32,6 +36,8 @@ export function TextField({
   maxLength,
   autoFocus,
   autoCapitalize = 'none',
+  multiline = false,
+  counter,
   style,
 }: TextFieldProps) {
   const hasError = typeof error === 'string' && error.length > 0;
@@ -39,7 +45,7 @@ export function TextField({
   return (
     <View style={[styles.field, style]}>
       <Text style={styles.label}>{label}</Text>
-      <View style={[styles.inputWrapper, hasError && styles.inputWrapperError]}>
+      <View style={[styles.inputWrapper, multiline && styles.inputWrapperMultiline, hasError && styles.inputWrapperError]}>
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -49,11 +55,13 @@ export function TextField({
           maxLength={maxLength}
           autoFocus={autoFocus}
           autoCapitalize={autoCapitalize}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : undefined}
           selectionColor={colors.primary}
           cursorColor={colors.primary}
           accessibilityLabel={label}
           accessibilityHint={hasError ? error : undefined}
-          style={styles.input}
+          style={[styles.input, multiline && styles.inputMultiline]}
         />
         {suffix ? (
           <Text style={styles.suffix} importantForAccessibility="no">
@@ -61,9 +69,16 @@ export function TextField({
           </Text>
         ) : null}
       </View>
-      <Text style={styles.error} accessibilityLiveRegion="polite" numberOfLines={2}>
-        {hasError ? error : ''}
-      </Text>
+      <View style={styles.footer}>
+        <Text style={styles.error} accessibilityLiveRegion="polite" numberOfLines={2}>
+          {hasError ? error : ''}
+        </Text>
+        {counter !== undefined ? (
+          <Text style={styles.counter} importantForAccessibility="no">
+            {counter}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -86,6 +101,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  inputWrapperMultiline: {
+    alignItems: 'flex-start',
+  },
   inputWrapperError: {
     borderColor: colors.error,
   },
@@ -96,14 +114,28 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     color: colors.textPrimary,
   },
+  inputMultiline: {
+    minHeight: 72,
+    maxHeight: 120,
+    paddingVertical: spacing.md,
+  },
   suffix: {
     ...typography.caption,
     marginLeft: spacing.sm,
     color: colors.textSecondary,
   },
+  footer: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
   error: {
     ...typography.caption,
+    flex: 1,
     minHeight: 18,
     color: colors.error,
+  },
+  counter: {
+    ...typography.caption,
+    color: colors.textSecondary,
   },
 });

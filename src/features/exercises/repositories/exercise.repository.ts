@@ -10,13 +10,14 @@ interface ExerciseRow {
   reps: number;
   weight: number;
   rest_seconds: number;
+  observation: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
 }
 
 const SELECT_COLUMNS =
-  'id, workout_id, name, sets, reps, weight, rest_seconds, sort_order, created_at, updated_at';
+  'id, workout_id, name, sets, reps, weight, rest_seconds, observation, sort_order, created_at, updated_at';
 
 function mapRowToExercise(row: ExerciseRow): Exercise {
   return {
@@ -27,6 +28,7 @@ function mapRowToExercise(row: ExerciseRow): Exercise {
     reps: row.reps,
     weightKg: row.weight,
     restSeconds: row.rest_seconds,
+    observation: row.observation,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -63,8 +65,8 @@ export const exerciseRepository = {
     const db = await getDatabase();
     await db.runAsync(
       `INSERT INTO exercises
-         (id, workout_id, name, sets, reps, weight, rest_seconds, sort_order, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?,
+         (id, workout_id, name, sets, reps, weight, rest_seconds, observation, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?,
          COALESCE(?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM exercises WHERE workout_id = ?)), ?, ?)`,
       [
         input.id,
@@ -74,6 +76,7 @@ export const exerciseRepository = {
         input.reps,
         input.weightKg,
         input.restSeconds,
+        input.observation ?? null,
         input.sortOrder ?? null,
         input.workoutId,
         input.createdAt,
@@ -87,9 +90,18 @@ export const exerciseRepository = {
     const db = await getDatabase();
     const result = await db.runAsync(
       `UPDATE exercises
-          SET name = ?, sets = ?, reps = ?, weight = ?, rest_seconds = ?, updated_at = ?
+          SET name = ?, sets = ?, reps = ?, weight = ?, rest_seconds = ?, observation = ?, updated_at = ?
         WHERE id = ?`,
-      [input.name, input.sets, input.reps, input.weightKg, input.restSeconds, updatedAt, id],
+      [
+        input.name,
+        input.sets,
+        input.reps,
+        input.weightKg,
+        input.restSeconds,
+        input.observation ?? null,
+        updatedAt,
+        id,
+      ],
     );
     return result.changes > 0;
   },

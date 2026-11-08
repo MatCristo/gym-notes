@@ -57,11 +57,14 @@ histórico, estatísticas e gráficos.
 
 **Exercícios**
 - Cadastrar exercícios com séries, repetições, carga (kg) e descanso (segundos), com validação dos campos.
+- Observação opcional em cada exercício (até 200 caracteres), ex.: “Manter a coluna apoiada.” — exibida na
+  lista de exercícios do treino e durante a execução.
 - Editar, duplicar (a cópia entra logo abaixo do original) e excluir exercícios.
 - Reordenar exercícios arrastando (a ordem é salva).
 
 **Execução do treino**
-- Iniciar um treino a partir do planejamento; o plano do dia é “congelado” no início da sessão.
+- Iniciar um treino a partir do planejamento; o plano do dia (incluindo as observações) é “congelado” no início
+  da sessão.
 - Registrar a carga e as repetições realmente feitas em cada série e marcar a série como concluída.
 - Cronômetro de descanso com pausar, retomar, ajustar ±15 s e encerrar — preciso mesmo com o app em segundo plano.
 - Retomar um treino em andamento depois de fechar o app.
@@ -87,7 +90,7 @@ própria do app: o código viaja pelo aplicativo de mensagens que você já usa.
 | Nome e ordem dos treinos | Cargas e repetições realizadas, séries concluídas |
 | Nome e ordem dos exercícios | Datas e horários de execução, duração dos treinos |
 | Séries, repetições, carga **planejada** e descanso | Recordes, estatísticas, evolução e gráficos |
-| | Identificadores internos e datas do banco |
+| Observação do exercício (quando houver) | Identificadores internos e datas do banco |
 
 > **Atenção:** o código **não é criptografado**. Ele é apenas codificado em texto: qualquer pessoa que o receber
 > consegue ler o conteúdo do planejamento. Compartilhe somente com quem você quiser.
@@ -110,8 +113,10 @@ substituído. Se já existir um planejamento com o mesmo nome, o novo recebe o s
 validado de novo no momento da confirmação. Se algo falhar no meio, nada é gravado.
 
 **Formato do código (visão geral)**
-- Começa com `GN1:` — identifica o Gym Notes e a versão do formato. Códigos de versões mais novas pedem a
-  atualização do app em vez de serem importados de forma incorreta.
+- Começa com `GN1:` ou `GN2:` — identifica o Gym Notes e a versão do formato. O app gera `GN1:` quando nenhum
+  exercício tem observação (formato original, que versões anteriores do app também importam) e `GN2:` quando há
+  observações. Códigos de versões mais novas pedem a atualização do app em vez de serem importados de forma
+  incorreta, e códigos `GN1:` antigos continuam sendo importados (com observações vazias).
 - O conteúdo é um JSON compacto em UTF-8 (acentos e emojis preservados) codificado em Base64, seguido de um
   **CRC-32** que detecta códigos incompletos ou alterados.
 - O código é validado inteiro antes de qualquer gravação, com os mesmos limites do app (nomes, séries, repetições,
@@ -227,9 +232,9 @@ Os dados ficam em um banco **SQLite local** (`gym-notes.db`), aberto uma única 
 | --- | --- |
 | `training_programs` | Planejamentos (nome, descrição opcional e ordem) |
 | `workouts` | Treinos de cada planejamento |
-| `exercises` | Exercícios planejados de cada treino |
+| `exercises` | Exercícios planejados de cada treino (com observação opcional) |
 | `workout_sessions` | Execuções de um treino (em andamento ou concluídas) |
-| `session_exercises` | Exercícios de cada execução |
+| `session_exercises` | Exercícios de cada execução (nome, descanso e observação copiados no início) |
 | `set_logs` | Séries: planejado e realizado |
 
 ## Como executar

@@ -36,7 +36,9 @@ function ExerciseCardComponent({ exercise, position, onPress, onOptionsPress, dr
         onPress={() => onPress(exercise)}
         onLongPress={draggable ? drag : undefined}
         accessibilityRole="button"
-        accessibilityLabel={`${position}º, ${exercise.name}, ${plan}${rest ? `, descanso de ${rest}` : ''}`}
+        accessibilityLabel={`${position}º, ${exercise.name}, ${plan}${rest ? `, descanso de ${rest}` : ''}${
+          exercise.observation ? `, observação: ${exercise.observation}` : ''
+        }`}
         accessibilityHint={draggable ? 'Toque para editar. Segure para reordenar.' : 'Edita o exercício'}
         android_ripple={{ color: colors.pressedOverlay }}
         style={({ pressed }) => [styles.card, pressed && styles.cardPressed, isActive && styles.cardActive]}
@@ -57,6 +59,11 @@ function ExerciseCardComponent({ exercise, position, onPress, onOptionsPress, dr
           <Text style={styles.name} numberOfLines={2}>
             {exercise.name}
           </Text>
+          {exercise.observation ? (
+            <Text style={styles.observation} numberOfLines={2} testID="exercise-observation">
+              {exercise.observation}
+            </Text>
+          ) : null}
           <Text style={styles.plan}>{plan}</Text>
           {rest ? <Text style={styles.rest}>Descanso {rest}</Text> : null}
         </View>
@@ -133,6 +140,11 @@ const styles = StyleSheet.create({
   name: {
     ...typography.subtitle,
     color: colors.textPrimary,
+  },
+  /** Observação: secundária e discreta, abaixo do nome (texto completo no formulário de edição). */
+  observation: {
+    ...typography.caption,
+    color: colors.textSecondary,
   },
   plan: {
     ...typography.body,

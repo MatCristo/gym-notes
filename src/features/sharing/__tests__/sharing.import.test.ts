@@ -304,7 +304,7 @@ describe('sharingService: prévia e importação', () => {
       ['sem código', () => 'bom dia!', 'not-found'],
       ['corrompido', (valid) => valid.slice(0, 12) + (valid[12] === 'A' ? 'B' : 'A') + valid.slice(13), 'corrupted'],
       ['truncado', (valid) => valid.slice(0, -15), 'corrupted'],
-      ['versão futura', (valid) => valid.replace('GN1:', 'GN2:'), 'unsupported-version'],
+      ['versão futura', (valid) => valid.replace('GN1:', 'GN3:'), 'unsupported-version'],
       ['estrutura inválida', () => envelopeOf('{"v":1,"p":{"n":"X","w":"nada"}}'), 'malformed'],
       ['fora dos limites', () => envelopeOf('{"v":1,"p":{"n":"X","w":[{"n":"A","e":[["S",0,1,0,0]]}]}}'), 'invalid-content'],
       ['grande demais', () => 'GN1:' + 'A'.repeat(200 * 1024), 'too-large'],

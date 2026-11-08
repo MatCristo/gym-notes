@@ -42,13 +42,16 @@ export class SharingServiceError extends Error {
  */
 
 function toExerciseStructure(exercise: Exercise): ExerciseInput {
-  return {
+  const structure: ExerciseInput = {
     name: exercise.name,
     sets: exercise.sets,
     reps: exercise.reps,
     weightKg: exercise.weightKg,
     restSeconds: exercise.restSeconds,
   };
+  // A observação é a única informação textual extra permitida; só entra quando existe.
+  if (exercise.observation !== null) structure.observation = exercise.observation;
+  return structure;
 }
 
 function toWorkoutStructure(workout: Workout, exercises: readonly Exercise[]): WorkoutStructure {

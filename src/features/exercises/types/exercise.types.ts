@@ -16,6 +16,8 @@ export interface Exercise {
   weightKg: number;
   /** Descanso planejado entre séries, em segundos (inteiro >= 0). */
   restSeconds: number;
+  /** Observação opcional (ex.: "Manter a coluna apoiada."); null quando não informada. */
+  observation: string | null;
   sortOrder: number;
   /** ISO 8601 */
   createdAt: string;
@@ -30,6 +32,8 @@ export interface ExerciseInput {
   reps: number;
   weightKg: number;
   restSeconds: number;
+  /** Opcional: ausente, null ou vazio = sem observação. */
+  observation?: string | null;
 }
 
 /** Valores crus do formulário (texto digitado). */
@@ -39,6 +43,7 @@ export interface ExerciseFormValues {
   reps: string;
   weightKg: string;
   restSeconds: string;
+  observation: string;
 }
 
 export type ExerciseField = keyof ExerciseFormValues;
@@ -49,4 +54,5 @@ export const EXERCISE_LIMITS = {
   repsMax: 999,
   weightMaxKg: 9999,
   restMaxSeconds: 3600,
+  observationMaxLength: 200,
 } as const;

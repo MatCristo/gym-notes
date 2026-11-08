@@ -38,6 +38,8 @@ export interface SessionExercise {
   /** `null` se o exercício de origem foi excluído depois. */
   exerciseId: string | null;
   exerciseNameSnapshot: string;
+  /** Observação do exercício congelada no início da sessão (null se não havia ou se a sessão é antiga). */
+  observationSnapshot: string | null;
   plannedRestSeconds: number;
   sortOrder: number;
   sets: SetLog[];

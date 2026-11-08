@@ -249,7 +249,9 @@ describe('inicialização do banco e migrations', () => {
 
       app = startApp(dbPath);
       const db = await app.database.getDatabase();
-      expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(6);
+      expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(
+        app.migrations.LATEST_DATABASE_VERSION,
+      );
 
       const programs = await app.programs.programService.listPrograms();
       expect(programs.map((p) => [p.name, p.workoutCount])).toEqual([['Meu planejamento', 3]]);
@@ -293,6 +295,150 @@ describe('inicialização do banco e migrations', () => {
 
       app = await restartApp(app);
       expect(await app.programs.programService.listPrograms()).toHaveLength(1);
+    });
+  });
+
+  describe('migration v7 (observação dos exercícios)', () => {
+    it('banco novo: exercises tem a coluna observation, que aceita nulo', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+      const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
+        'PRAGMA table_info(exercises)',
+      );
+      expect(columns.find((c) => c.name === 'observation')).toMatchObject({ notnull: 0, dflt_value: null });
+    });
+
+    it('migra um banco v6 com dados: exercícios antigos ficam com observação nula e nada mais muda', async () => {
+      const dbPath = newDatabasePath();
+      app = startApp(dbPath);
+      const raw = await jest
+        .requireActual<typeof import('../../../test/mocks/expo-sqlite')>('../../../test/mocks/expo-sqlite')
+        .openDatabaseAsync('v6');
+      await raw.execAsync('PRAGMA foreign_keys = ON;');
+      for (const migration of app.migrations.MIGRATIONS.filter((m) => m.version <= 6)) {
+        await migration.up(raw as unknown as SQLiteDatabase);
+      }
+      await raw.execAsync('PRAGMA user_version = 6');
+      const [workout] = await raw.getAllAsync<{ id: string }>('SELECT id FROM workouts ORDER BY sort_order');
+      const t = '2026-10-01T10:00:00.000Z';
+      await raw.runAsync(
+        `INSERT INTO exercises (id, workout_id, name, sets, reps, weight, rest_seconds, sort_order, created_at, updated_at)
+         VALUES ('ex-1', ?, 'Supino', 4, 12, 42.5, 90, 0, ?, ?)`,
+        [workout!.id, t, t],
+      );
+      await raw.runAsync(
+        `INSERT INTO workout_sessions (id, workout_id, workout_name_snapshot, started_at, completed_at, status)
+         VALUES ('s-1', ?, 'Treino A', ?, ?, 'completed')`,
+        [workout!.id, t, t],
+      );
+      const before = {
+        sessions: await raw.getAllAsync('SELECT * FROM workout_sessions'),
+        workouts: await raw.getAllAsync('SELECT * FROM workouts ORDER BY id'),
+      };
+      await raw.closeAsync();
+
+      app = startApp(dbPath);
+      const db = await app.database.getDatabase();
+      expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(
+        app.migrations.LATEST_DATABASE_VERSION,
+      );
+      expect(await app.exerciseRepository.findById('ex-1')).toMatchObject({
+        name: 'Supino',
+        sets: 4,
+        reps: 12,
+        weightKg: 42.5,
+        restSeconds: 90,
+        observation: null,
+        createdAt: t,
+        updatedAt: t,
+      });
+      expect(await db.getAllAsync('SELECT * FROM workout_sessions')).toEqual(before.sessions);
+      expect(await db.getAllAsync('SELECT * FROM workouts ORDER BY id')).toEqual(before.workouts);
+    });
+
+    it('reexecutar a migration v7 não falha nem altera dados', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+      const [w] = await listDefaultWorkouts(app);
+      await app.exercises.exerciseService.createExercise(w!.id, {
+        name: 'Supino',
+        sets: 3,
+        reps: 10,
+        weightKg: 20,
+        restSeconds: 60,
+        observation: 'Coluna apoiada',
+      });
+      const before = await db.getAllAsync('SELECT * FROM exercises');
+      const v7 = app.migrations.MIGRATIONS.find((m) => m.version === 7)!;
+
+      await db.withTransactionAsync(() => v7.up(db));
+
+      expect(await db.getAllAsync('SELECT * FROM exercises')).toEqual(before);
+    });
+  });
+
+  describe('migration v8 (observação congelada nas sessões)', () => {
+    it('migra um banco v7 com sessões: elas ficam com observação nula e continuam funcionando', async () => {
+      const dbPath = newDatabasePath();
+      app = startApp(dbPath);
+      const raw = await jest
+        .requireActual<typeof import('../../../test/mocks/expo-sqlite')>('../../../test/mocks/expo-sqlite')
+        .openDatabaseAsync('v7');
+      await raw.execAsync('PRAGMA foreign_keys = ON;');
+      for (const migration of app.migrations.MIGRATIONS.filter((m) => m.version <= 7)) {
+        await migration.up(raw as unknown as SQLiteDatabase);
+      }
+      await raw.execAsync('PRAGMA user_version = 7');
+      const [a, b] = await raw.getAllAsync<{ id: string }>('SELECT id FROM workouts ORDER BY sort_order');
+      const t = '2026-10-01T10:00:00.000Z';
+      await raw.runAsync(
+        `INSERT INTO exercises (id, workout_id, name, sets, reps, weight, rest_seconds, observation, sort_order, created_at, updated_at)
+         VALUES ('ex-a', ?, 'Supino', 1, 10, 40, 90, 'Coluna apoiada', 0, ?, ?), ('ex-b', ?, 'Remada', 1, 10, 30, 60, NULL, 0, ?, ?)`,
+        [a!.id, t, t, b!.id, t, t],
+      );
+      await raw.runAsync(
+        `INSERT INTO workout_sessions (id, workout_id, workout_name_snapshot, started_at, completed_at, status)
+         VALUES ('s-done', ?, 'Treino A', ?, ?, 'completed'), ('s-live', ?, 'Treino B', ?, NULL, 'in_progress')`,
+        [a!.id, t, t, b!.id, t],
+      );
+      await raw.runAsync(
+        `INSERT INTO session_exercises (id, session_id, exercise_id, exercise_name_snapshot, planned_rest_seconds, sort_order)
+         VALUES ('se-done', 's-done', 'ex-a', 'Supino', 90, 0), ('se-live', 's-live', 'ex-b', 'Remada', 60, 0)`,
+      );
+      await raw.runAsync(
+        `INSERT INTO set_logs (id, session_exercise_id, set_number, planned_reps, actual_reps, planned_weight, actual_weight, completed_at)
+         VALUES ('sl-1', 'se-done', 1, 10, 10, 40, 42.5, ?), ('sl-2', 'se-live', 1, 10, 8, 30, 32, ?)`,
+        [t, t],
+      );
+      const before = {
+        sessions: await raw.getAllAsync('SELECT * FROM workout_sessions ORDER BY id'),
+        setLogs: await raw.getAllAsync('SELECT * FROM set_logs ORDER BY id'),
+      };
+      await raw.closeAsync();
+
+      app = startApp(dbPath);
+      const db = await app.database.getDatabase();
+      expect((await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!.user_version).toBe(8);
+      // Sessões antigas: observação nula (não é inventada a partir do exercício atual).
+      const done = (await app.sessions.sessionService.getSessionDetails('s-done'))!;
+      expect(done.exercises[0]).toMatchObject({ exerciseNameSnapshot: 'Supino', observationSnapshot: null });
+      expect(done.exercises[0]!.sets[0]).toMatchObject({ actualWeightKg: 42.5 });
+      expect(await app.sessions.sessionService.startSession(b!.id)).toEqual({ sessionId: 's-live', resumed: true });
+      expect((await app.history.historyService.listCompletedSessions()).map((s) => s.id)).toEqual(['s-done']);
+      // Histórico intacto.
+      expect(await db.getAllAsync('SELECT * FROM workout_sessions ORDER BY id')).toEqual(before.sessions);
+      expect(await db.getAllAsync('SELECT * FROM set_logs ORDER BY id')).toEqual(before.setLogs);
+    });
+
+    it('reexecutar a migration v8 não falha nem altera dados', async () => {
+      app = startApp();
+      const db = await app.database.getDatabase();
+      const before = await db.getAllAsync('SELECT * FROM session_exercises');
+      const v8 = app.migrations.MIGRATIONS.find((m) => m.version === 8)!;
+      await db.withTransactionAsync(() => v8.up(db));
+      expect(await db.getAllAsync('SELECT * FROM session_exercises')).toEqual(before);
+      const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(session_exercises)');
+      expect(columns.filter((c) => c.name === 'observation_snapshot')).toHaveLength(1);
     });
   });
 

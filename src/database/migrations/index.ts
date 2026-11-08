@@ -181,6 +181,30 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    description: 'Adiciona a observação opcional aos exercícios planejados',
+    up: async (db) => {
+      // Apenas acrescenta a coluna (aceita nulo): nenhuma tabela é recriada e nenhum dado é alterado.
+      // Exercícios existentes ficam com observação NULL. Sessões/histórico não são tocados.
+      const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(exercises)');
+      if (!columns.some((column) => column.name === 'observation')) {
+        await db.execAsync('ALTER TABLE exercises ADD COLUMN observation TEXT');
+      }
+    },
+  },
+  {
+    version: 8,
+    description: 'Adiciona a cópia (snapshot) da observação aos exercícios de cada sessão',
+    up: async (db) => {
+      // Só acrescenta a coluna (aceita nulo): sessões existentes ficam com NULL e nenhum dado muda.
+      // A observação passa a ser congelada no início da sessão, como o nome e o descanso.
+      const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(session_exercises)');
+      if (!columns.some((column) => column.name === 'observation_snapshot')) {
+        await db.execAsync('ALTER TABLE session_exercises ADD COLUMN observation_snapshot TEXT');
+      }
+    },
+  },
 ];
 
 export const LATEST_DATABASE_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

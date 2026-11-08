@@ -134,6 +134,8 @@ export const sessionService = {
             sessionId,
             exerciseId: exercise.id,
             exerciseNameSnapshot: exercise.name,
+            // Congelada agora: editar ou remover a observação depois não muda esta sessão.
+            observationSnapshot: exercise.observation,
             plannedRestSeconds: exercise.restSeconds,
             sortOrder: index,
           });

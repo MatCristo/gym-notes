@@ -108,6 +108,7 @@ export async function createProgramFromStructure(
         reps: exercise.reps,
         weightKg: exercise.weightKg,
         restSeconds: exercise.restSeconds,
+        observation: exercise.observation ?? null,
         sortOrder: exerciseIndex,
         createdAt,
       });

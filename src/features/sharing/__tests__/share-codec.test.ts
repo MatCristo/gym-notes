@@ -217,13 +217,13 @@ describe('código de compartilhamento GN1', () => {
     expect(decodeShareCode(`xx ${wrapped} yy`)).toEqual({ ok: true, value: structure });
   });
 
-  it('acha o código mesmo com "GN1:"/"GN2:" soltos no texto antes dele', () => {
+  it('acha o código mesmo com "GN1:"/"GN3:" soltos no texto antes dele', () => {
     const code = encode(structure);
     expect(decodeShareCode(`segue o GN1:\n${code}`)).toEqual({ ok: true, value: structure });
-    expect(decodeShareCode(`GN1: GN2: GN1:abc.zz ${code} GN1:`)).toEqual({ ok: true, value: structure });
+    expect(decodeShareCode(`GN1: GN3: GN1:abc.zz ${code} GN1:`)).toEqual({ ok: true, value: structure });
     // Sem nenhum código íntegro, o erro é o da última ocorrência.
     expect(errorOf('segue o GN1: depois mando')).toBe('corrupted');
-    expect(errorOf(`GN1: e ${code.replace('GN1:', 'GN2:')}`)).toBe('unsupported-version');
+    expect(errorOf(`GN1: e ${code.replace('GN1:', 'GN3:')}`)).toBe('unsupported-version');
   });
 
   it('muitos cabeçalhos falsos no limite de tamanho não degradam o desempenho', () => {
@@ -273,10 +273,13 @@ describe('código de compartilhamento GN1', () => {
     expect(errorOf(code.replace('GN1:', 'gn1:'))).toBe('not-found');
     expect(errorOf(code.replace('GN1:', 'GN:'))).toBe('not-found');
     expect(errorOf('um texto qualquer sem código')).toBe('not-found');
-    expect(errorOf(code.replace('GN1:', 'GN2:'))).toBe('unsupported-version');
+    expect(errorOf(code.replace('GN1:', 'GN3:'))).toBe('unsupported-version');
+    // Cabeçalho e conteúdo precisam indicar a mesma versão.
+    expect(errorOf(code.replace('GN1:', 'GN2:'))).toBe('malformed');
     expect(errorOf(code.replace('GN1:', 'GN0:'))).toBe('malformed');
     // Envelope v1 íntegro, mas com payload de versão futura.
-    expect(errorOf(envelopeOf('{"v":2,"p":{}}'))).toBe('unsupported-version');
+    expect(errorOf(envelopeOf('{"v":3,"p":{}}', 3))).toBe('unsupported-version');
+    expect(errorOf(envelopeOf('{"v":3,"p":{}}'))).toBe('unsupported-version');
   });
 
   it('vazio → empty; acima de 100 KB → too-large sem decodificar', () => {
